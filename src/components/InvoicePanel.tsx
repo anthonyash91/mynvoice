@@ -64,10 +64,10 @@ export function InvoicePanel({
               onClick={onMarkSent}
               className="h-7 px-2 text-[13px] text-foreground rounded hover:bg-secondary flex items-center gap-1"
             >
-              <Send className="h-3.5 w-3.5" /> Mark as Sent
+              <Send className="h-3.5 w-3.5" /> Mark as Unpaid
             </button>
           )}
-          {(status === 'sent' || status === 'overdue') && (
+          {(status === 'unpaid' || status === 'overdue') && (
             <button
               onClick={onMarkPaid}
               className="h-7 px-2 text-[13px] text-foreground rounded hover:bg-secondary flex items-center gap-1"

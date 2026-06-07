@@ -21,6 +21,7 @@ export function EditClientPanel({ client, onClose, onSave, onDelete }: EditClien
     hourlyRate: client.hourlyRate,
     additionalEmails: [...client.additionalEmails],
     additionalRates: client.additionalRates.map((r) => ({ ...r })),
+    recurringLineItems: client.recurringLineItems.map((item) => ({ ...item })),
     address: client.address,
   });
   const [saving, setSaving] = useState(false);
@@ -55,7 +56,7 @@ export function EditClientPanel({ client, onClose, onSave, onDelete }: EditClien
 
   return (
     <PanelShell title={clientDisplayName(client)} onClose={onClose}>
-      <div className="p-6 flex flex-col gap-4">
+      <div className="w-full flex flex-col gap-4 px-6 pt-5 pb-6">
         <ClientFormFields draft={draft} onChange={setDraft} />
         <div className="border-t border-border pt-[22px] flex justify-between gap-2">
           <button

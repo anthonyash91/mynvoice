@@ -5,7 +5,7 @@ import { statusLabel } from '@/lib/invoice';
 const STATUS_COLORS: Record<InvoiceStatus, string | null> = {
   paid: '#34C759',
   overdue: '#FF3B30',
-  sent: '#0071E3',
+  unpaid: '#0071E3',
   draft: null,
 };
 

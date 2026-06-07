@@ -1,3 +1,5 @@
+import { applyPdfPageBreakAvoidance } from '@/lib/pdfPageBreaks';
+
 const INVOICE_PADDING = 40;
 const CAPTURE_SCALE = 2;
 
@@ -31,6 +33,7 @@ export async function downloadInvoicePdf(invoiceNumber: string): Promise<void> {
 
   try {
     await document.fonts.ready;
+    applyPdfPageBreakAvoidance(container, CAPTURE_WIDTH_PX);
 
     const captureHeight = container.scrollHeight;
 

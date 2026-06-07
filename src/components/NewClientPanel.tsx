@@ -27,7 +27,7 @@ export function NewClientPanel({ onClose, onSave }: NewClientPanelProps) {
 
   return (
     <PanelShell title="New client" onClose={onClose} backArrow>
-      <div className="p-6 flex flex-col gap-4">
+      <div className="w-full flex flex-col gap-4 px-6 pt-5 pb-6">
         <ClientFormFields draft={draft} onChange={setDraft} />
         <div className="border-t border-border pt-[22px] flex justify-end gap-2">
           <button onClick={onClose} className="h-8 px-3 text-[13px] rounded hover:bg-secondary">

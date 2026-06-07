@@ -1,20 +1,48 @@
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue';
+export type InvoiceStatus = 'draft' | 'unpaid' | 'paid' | 'overdue';
 
-export type View = 'invoices' | 'clients' | 'settings';
+export type View = 'invoices' | 'clients' | 'calendar' | 'settings';
 
 export type Panel =
   | { kind: 'clients' }
   | { kind: 'settings' }
+  | { kind: 'calendar-day'; date: string }
   | { kind: 'invoice'; id: string }
   | { kind: 'edit-client'; id: string }
   | { kind: 'new-client' }
   | { kind: 'new-invoice' };
+
+export type CalendarEntryType = 'hourly' | 'fixed';
 
 export interface LineItem {
   id: string;
   description: string;
   quantity: number;
   rate: number;
+  entryType?: CalendarEntryType;
+  sourceCalendarEntryId?: string;
+  sourceRecurringLineItemId?: string;
+  sourceDate?: string;
+}
+
+export interface CalendarEntry {
+  id: string;
+  clientId: string;
+  date: string;
+  description: string;
+  quantity: number;
+  rate: number;
+  entryType: CalendarEntryType;
+  invoiceId?: string | null;
+  recurringLineItemId?: string | null;
+}
+
+export interface RecurringLineItem {
+  id: string;
+  description: string;
+  quantity: number;
+  rate: number;
+  entryType: CalendarEntryType;
+  dayOfMonth: number;
 }
 
 export interface Invoice {
@@ -23,7 +51,7 @@ export interface Invoice {
   clientName: string;
   number: string;
   issueDate: string;
-  dueDate: string;
+  dueDate: string | null;
   lineItems: LineItem[];
   notes: string;
   taxEnabled: boolean;
@@ -46,6 +74,7 @@ export interface Client {
   hourlyRate: number;
   additionalEmails: string[];
   additionalRates: ClientRate[];
+  recurringLineItems: RecurringLineItem[];
   address: string;
 }
 
@@ -56,12 +85,14 @@ export interface Settings {
   mailingAddress: string;
   paymentDetails: string;
   defaultTaxRate: number;
+  defaultDueDays: number;
   logo: string | null;
 }
 
 export interface AppData {
   invoices: Invoice[];
   clients: Client[];
+  calendarEntries: CalendarEntry[];
   settings: Settings;
   nextInvoiceNumber: number;
 }
@@ -71,7 +102,7 @@ export interface InvoiceDraft {
   clientName: string;
   number: string;
   issueDate: string;
-  dueDate: string;
+  dueDate: string | null;
   lineItems: LineItem[];
   notes: string;
   taxEnabled: boolean;
@@ -88,5 +119,6 @@ export function activeViewFromPanel(panel: Panel | null): View {
     return 'clients';
   }
   if (panel.kind === 'settings') return 'settings';
+  if (panel.kind === 'calendar-day') return 'calendar';
   return 'invoices';
 }

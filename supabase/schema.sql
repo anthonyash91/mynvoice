@@ -11,6 +11,7 @@ create table if not exists public.clients (
   hourly_rate numeric not null default 0,
   additional_emails jsonb not null default '[]'::jsonb,
   additional_rates jsonb not null default '[]'::jsonb,
+  recurring_line_items jsonb not null default '[]'::jsonb,
   address text not null default '',
   created_at timestamptz not null default now()
 );
@@ -25,19 +26,40 @@ create table if not exists public.invoices (
   client_name text not null,
   number text not null,
   issue_date date not null,
-  due_date date not null,
+  due_date date,
   line_items jsonb not null default '[]'::jsonb,
   notes text not null default '',
   tax_enabled boolean not null default false,
   tax_rate numeric not null default 0,
   status text not null default 'draft'
-    check (status in ('draft', 'sent', 'paid', 'overdue')),
+    check (status in ('draft', 'unpaid', 'paid', 'overdue')),
   created_at date not null default current_date,
-  unique (user_id, number)
+  unique (user_id, client_id, number)
 );
 
 create index if not exists invoices_user_id_idx on public.invoices (user_id);
 create index if not exists invoices_client_id_idx on public.invoices (client_id);
+
+-- Calendar work log entries (billable line items per client per day)
+create table if not exists public.calendar_entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  client_id uuid not null references public.clients (id) on delete cascade,
+  entry_date date not null,
+  description text not null default '',
+  quantity numeric not null default 1,
+  rate numeric not null default 0,
+  entry_type text not null default 'hourly'
+    check (entry_type in ('hourly', 'fixed')),
+  invoice_id uuid references public.invoices (id) on delete set null,
+  recurring_line_item_id uuid,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists calendar_entries_user_id_idx on public.calendar_entries (user_id);
+create index if not exists calendar_entries_invoice_id_idx on public.calendar_entries (invoice_id);
+create index if not exists calendar_entries_client_id_idx on public.calendar_entries (client_id);
+create index if not exists calendar_entries_entry_date_idx on public.calendar_entries (entry_date);
 
 -- Per-user settings + invoice counter
 create table if not exists public.user_settings (
@@ -48,6 +70,7 @@ create table if not exists public.user_settings (
   mailing_address text not null default '',
   payment_details text not null default '',
   default_tax_rate numeric not null default 0,
+  default_due_days integer not null default 14,
   logo text,
   next_invoice_number integer not null default 1,
   updated_at timestamptz not null default now()
@@ -78,6 +101,7 @@ execute function public.handle_new_user ();
 -- Row Level Security
 alter table public.clients enable row level security;
 alter table public.invoices enable row level security;
+alter table public.calendar_entries enable row level security;
 alter table public.user_settings enable row level security;
 
 -- Clients policies
@@ -116,6 +140,24 @@ create policy "Users can delete own invoices"
 on public.invoices for delete
 using (auth.uid () = user_id);
 
+-- Calendar policies
+create policy "Users can view own calendar entries"
+on public.calendar_entries for select
+using (auth.uid () = user_id);
+
+create policy "Users can insert own calendar entries"
+on public.calendar_entries for insert
+with check (auth.uid () = user_id);
+
+create policy "Users can update own calendar entries"
+on public.calendar_entries for update
+using (auth.uid () = user_id)
+with check (auth.uid () = user_id);
+
+create policy "Users can delete own calendar entries"
+on public.calendar_entries for delete
+using (auth.uid () = user_id);
+
 -- Settings policies
 create policy "Users can view own settings"
 on public.user_settings for select
@@ -135,8 +177,10 @@ grant usage on schema public to anon, authenticated;
 
 grant select, insert, update, delete on public.clients to authenticated;
 grant select, insert, update, delete on public.invoices to authenticated;
+grant select, insert, update, delete on public.calendar_entries to authenticated;
 grant select, insert, update, delete on public.user_settings to authenticated;
 
 grant select on public.clients to anon;
 grant select on public.invoices to anon;
+grant select on public.calendar_entries to anon;
 grant select on public.user_settings to anon;

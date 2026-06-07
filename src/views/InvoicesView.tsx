@@ -25,7 +25,7 @@ export function InvoicesView({ invoices, onOpenInvoice, onNewInvoice }: Invoices
             <th className="text-left font-normal px-8 py-2.5">Client</th>
             <th className="text-left font-normal py-2.5">Invoice</th>
             <th className="text-left font-normal py-2.5">Amount</th>
-            <th className="text-left font-normal pl-8 py-2.5">Due</th>
+            <th className="text-left font-normal py-2.5">Due</th>
             <th className="text-left font-normal px-8 py-2.5">Status</th>
           </tr>
         </thead>
@@ -52,7 +52,9 @@ export function InvoicesView({ invoices, onOpenInvoice, onNewInvoice }: Invoices
                   <td className="px-8 py-2.5">{inv.clientName}</td>
                   <td className="py-2.5 font-mono text-muted-foreground">{inv.number}</td>
                   <td className="py-2.5 tabular-nums">{formatCurrency(total)}</td>
-                  <td className="pl-8 py-2.5 text-muted-foreground">{formatDate(inv.dueDate)}</td>
+                  <td className="py-2.5 text-muted-foreground">
+                    {inv.dueDate ? formatDate(inv.dueDate) : '—'}
+                  </td>
                   <td className="px-8 py-2.5">
                     <StatusLabel status={status} />
                   </td>

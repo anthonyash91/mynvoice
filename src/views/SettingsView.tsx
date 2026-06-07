@@ -1,4 +1,5 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
+import { useConfirm } from '@/hooks/useConfirm';
 import { Field } from '@/components/Field';
 import { TextInput } from '@/components/TextInput';
 import { ViewHeader } from '@/components/ViewHeader';
@@ -14,6 +15,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
+  const confirm = useConfirm();
   const [draft, setDraft] = useState<Settings>(settings);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,6 +34,7 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
     settings.mailingAddress,
     settings.paymentDetails,
     settings.defaultTaxRate,
+    settings.defaultDueDays,
     settings.logo,
   ]);
 
@@ -64,7 +67,7 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
   return (
     <div className="inline-flex flex-col h-full w-[360px] max-w-full shrink-0">
       <ViewHeader inPanel onClose={onClose} title="Settings" />
-      <div className="flex-1 overflow-auto px-6 py-6 space-y-5 min-w-0">
+      <div className="flex-1 overflow-auto px-6 pt-5 pb-6 space-y-5 min-w-0">
         <Field label="Business name">
           <TextInput
             value={draft.businessName}
@@ -132,6 +135,18 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           />
         </Field>
 
+        <Field label="Default due date (days)">
+          <TextInput
+            type="number"
+            value={String(draft.defaultDueDays)}
+            onChange={(v) => setDraft({ ...draft, defaultDueDays: v === '' ? 0 : Number(v) })}
+            placeholder="14"
+          />
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            Days after the issue date on new invoices.
+          </p>
+        </Field>
+
         <Field label="Logo" className="pb-[2px]">
           <div className="flex items-center gap-3 min-w-0">
             {draft.logo && (
@@ -170,7 +185,13 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
             )}
             {draft.logo && (
               <button
-                onClick={() => {
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Remove logo?',
+                    description: 'Your logo will be removed when you save settings.',
+                    confirmLabel: 'Remove',
+                  });
+                  if (!ok) return;
                   setDraft({ ...draft, logo: null });
                   setLogoFileName(null);
                   resetLogoInput();

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 
 export function Field({
   label,
@@ -10,7 +11,7 @@ export function Field({
   className?: string;
 }) {
   return (
-    <div className={className}>
+    <div className={cn('w-full min-w-0', className)}>
       <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-1.5">
         {label}
       </div>

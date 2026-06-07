@@ -1,4 +1,7 @@
 import type { Client, ClientRate } from '@/types';
+import { emptyRecurringLineItem } from '@/lib/recurring';
+
+export { emptyRecurringLineItem };
 
 export type ClientDraft = Omit<Client, 'id'>;
 
@@ -10,16 +13,26 @@ export function emptyClientDraft(): ClientDraft {
     hourlyRate: 0,
     additionalEmails: [],
     additionalRates: [],
+    recurringLineItems: [],
     address: '',
   };
 }
 
 export function clientDisplayName(client: Pick<Client, 'owner' | 'companyName'>): string {
-  return client.owner.trim() || client.companyName.trim();
+  return client.companyName.trim() || client.owner.trim();
 }
 
 export function clientInvoiceName(client: Pick<Client, 'owner' | 'companyName'>): string {
-  return client.owner.trim() || client.companyName.trim();
+  return client.companyName.trim() || client.owner.trim();
+}
+
+export function clientSecondaryName(
+  client: Pick<Client, 'owner' | 'companyName'>
+): string | null {
+  const company = client.companyName.trim();
+  const owner = client.owner.trim();
+  if (company && owner) return owner;
+  return null;
 }
 
 export function emptyClientRate(): ClientRate {
@@ -147,6 +160,60 @@ export function clientAddressSummary(address: string): ClientAddressSummary | nu
   return null;
 }
 
+export interface ClientHourlyRateOption {
+  id: string;
+  label: string;
+  rate: number;
+}
+
+export function clientHourlyRateOptions(
+  client: Pick<Client, 'hourlyRate' | 'additionalRates'>
+): ClientHourlyRateOption[] {
+  const options: ClientHourlyRateOption[] = [];
+
+  if (client.hourlyRate > 0) {
+    options.push({
+      id: 'primary',
+      label: 'Hourly rate',
+      rate: client.hourlyRate,
+    });
+  }
+
+  for (const additional of client.additionalRates) {
+    if (additional.rate > 0 || additional.label.trim()) {
+      options.push({
+        id: additional.id,
+        label: additional.label.trim() || 'Additional rate',
+        rate: additional.rate,
+      });
+    }
+  }
+
+  if (options.length === 0) {
+    options.push({
+      id: 'primary',
+      label: 'Hourly rate',
+      rate: client.hourlyRate,
+    });
+  }
+
+  return options;
+}
+
+export function clientHourlyRateSelection(
+  client: Pick<Client, 'hourlyRate' | 'additionalRates'>,
+  rate: number
+): { options: ClientHourlyRateOption[]; selectedId: string } {
+  const options = clientHourlyRateOptions(client);
+  const match = options.find((option) => option.rate === rate);
+  if (match) return { options, selectedId: match.id };
+
+  return {
+    options: [{ id: 'logged', label: 'Logged rate', rate }, ...options],
+    selectedId: 'logged',
+  };
+}
+
 export function clientRateLines(
   client: Pick<Client, 'hourlyRate' | 'additionalRates'>
 ): ClientRateLine[] {
@@ -173,6 +240,15 @@ export function normalizeClientDraft(draft: ClientDraft): ClientDraft {
     additionalRates: draft.additionalRates
       .map((r) => ({ ...r, label: r.label.trim(), rate: Number(r.rate) || 0 }))
       .filter((r) => r.label || r.rate > 0),
+    recurringLineItems: draft.recurringLineItems
+      .map((item) => ({
+        ...item,
+        description: item.description.trim(),
+        quantity: item.entryType === 'fixed' ? 1 : Number(item.quantity) || 0,
+        rate: Number(item.rate) || 0,
+        dayOfMonth: Math.min(31, Math.max(1, Math.round(item.dayOfMonth) || 1)),
+      }))
+      .filter((item) => item.description && item.rate > 0),
   };
 }
 

@@ -23,9 +23,11 @@ function measureIntrinsicWidth(el: HTMLElement) {
 
 export function AppPanel({
   children,
+  widthKey,
   closing = false,
 }: {
   children: ReactNode;
+  widthKey: string;
   closing?: boolean;
 }) {
   const innerRef = useRef<HTMLDivElement>(null);
@@ -42,7 +44,7 @@ export function AppPanel({
     if (!el) return;
 
     setWidth(measureIntrinsicWidth(el));
-  }, [children]);
+  }, [widthKey]);
 
   useEffect(() => {
     let viewportWidth = window.innerWidth;
@@ -59,7 +61,7 @@ export function AppPanel({
 
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [children]);
+  }, [widthKey]);
 
   return (
     <aside

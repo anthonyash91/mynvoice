@@ -9,6 +9,8 @@ import { NewInvoicePanel } from '@/components/NewInvoicePanel';
 import { InvoicesView } from '@/views/InvoicesView';
 import { ClientsView } from '@/views/ClientsView';
 import { SettingsView } from '@/views/SettingsView';
+import { CalendarView } from '@/views/CalendarView';
+import { CalendarDayPanel } from '@/components/CalendarDayPanel';
 import { LoginView } from '@/views/LoginView';
 import { useAuth } from '@/hooks/useAuth';
 import { ConfirmProvider } from '@/hooks/useConfirm';
@@ -16,6 +18,13 @@ import { useStore } from '@/hooks/useStore';
 import { activeViewFromPanel, type Panel, type View } from '@/types';
 
 const PANEL_ANIMATION_MS = 220;
+
+function panelWidthKey(panel: Panel): string {
+  if (panel.kind === 'invoice') return `invoice:${panel.id}`;
+  if (panel.kind === 'edit-client') return `edit-client:${panel.id}`;
+  if (panel.kind === 'calendar-day') return `calendar-day:${panel.date}`;
+  return panel.kind;
+}
 
 function SetupView() {
   return (
@@ -49,10 +58,14 @@ function AppShell() {
     saveInvoiceDraft,
     updateInvoiceStatus,
     deleteInvoice,
-    getNextInvoiceNumber,
     getClientInvoiceCount,
+    addCalendarEntry,
+    updateCalendarEntry,
+    deleteCalendarEntry,
+    ensureRecurringCalendarEntriesForMonth,
   } = useStore(user);
 
+  const [activeView, setActiveView] = useState<View>('invoices');
   const [panel, setPanelState] = useState<Panel | null>(null);
   const [panelClosing, setPanelClosing] = useState(false);
   const panelRef = useRef<Panel | null>(null);
@@ -90,7 +103,8 @@ function AppShell() {
   }, []);
 
   const goto = useCallback((next: View) => {
-    if (next === 'invoices') {
+    setActiveView(next);
+    if (next === 'invoices' || next === 'calendar') {
       setPanel(null);
     } else if (next === 'clients') {
       setPanel({ kind: 'clients' });
@@ -142,7 +156,7 @@ function AppShell() {
     <ConfirmProvider>
     <div className="flex h-screen w-full bg-background text-foreground">
       <Sidebar
-        activeView={activeViewFromPanel(panel)}
+        activeView={panel ? activeViewFromPanel(panel) : activeView}
         onNavigate={goto}
         onNewInvoice={openNewInvoice}
         onSignOut={signOut}
@@ -150,11 +164,19 @@ function AppShell() {
 
       <div className="flex-1 relative min-w-0">
         <main className="absolute inset-0 overflow-auto">
-          <InvoicesView
-            invoices={data.invoices}
-            onOpenInvoice={openInvoice}
-            onNewInvoice={openNewInvoice}
-          />
+          {activeView === 'calendar' ? (
+            <CalendarView
+              entries={data.calendarEntries}
+              onOpenDay={(date) => setPanel({ kind: 'calendar-day', date })}
+              onEnsureRecurringForMonth={ensureRecurringCalendarEntriesForMonth}
+            />
+          ) : (
+            <InvoicesView
+              invoices={data.invoices}
+              onOpenInvoice={openInvoice}
+              onNewInvoice={openNewInvoice}
+            />
+          )}
         </main>
 
         {panel && (
@@ -169,7 +191,19 @@ function AppShell() {
                 panelClosing ? 'animate-fade-out' : 'animate-fade-in'
               )}
             />
-            <AppPanel closing={panelClosing}>
+            <AppPanel closing={panelClosing} widthKey={panelWidthKey(panel)}>
+            {panel.kind === 'calendar-day' && (
+              <CalendarDayPanel
+                date={panel.date}
+                clients={data.clients}
+                invoices={data.invoices}
+                entries={data.calendarEntries}
+                onClose={() => setPanel(null)}
+                onAdd={addCalendarEntry}
+                onUpdate={updateCalendarEntry}
+                onDelete={deleteCalendarEntry}
+              />
+            )}
             {panel.kind === 'clients' && (
               <ClientsView
                 clients={data.clients}
@@ -193,7 +227,7 @@ function AppShell() {
                 client={invoiceClient}
                 settings={data.settings}
                 onClose={() => setPanel(null)}
-                onMarkSent={() => updateInvoiceStatus(panelInvoice.id, 'sent')}
+                onMarkSent={() => updateInvoiceStatus(panelInvoice.id, 'unpaid')}
                 onMarkPaid={() => updateInvoiceStatus(panelInvoice.id, 'paid')}
                 onDelete={async () => {
                   await deleteInvoice(panelInvoice.id);
@@ -222,13 +256,17 @@ function AppShell() {
             {panel.kind === 'new-invoice' && (
               <NewInvoicePanel
                 clients={data.clients}
+                invoices={data.invoices}
+                calendarEntries={data.calendarEntries}
                 settings={data.settings}
-                initialNumber={getNextInvoiceNumber()}
                 onClose={() => setPanel(null)}
                 onSave={async (draft, status) => {
                   const saved = await saveInvoiceDraft(draft, status);
                   setPanel({ kind: 'invoice', id: saved.id });
                 }}
+                onAddCalendarEntry={addCalendarEntry}
+                onUpdateCalendarEntry={updateCalendarEntry}
+                onDeleteCalendarEntry={deleteCalendarEntry}
               />
             )}
           </AppPanel>

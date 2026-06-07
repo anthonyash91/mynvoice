@@ -22,6 +22,7 @@ function seedData(): AppData {
       hourlyRate: 150,
       additionalEmails: [],
       additionalRates: [],
+      recurringLineItems: [],
       address: '',
     },
     {
@@ -32,6 +33,7 @@ function seedData(): AppData {
       hourlyRate: 175,
       additionalEmails: [],
       additionalRates: [],
+      recurringLineItems: [],
       address: '',
     },
     {
@@ -42,6 +44,7 @@ function seedData(): AppData {
       hourlyRate: 350,
       additionalEmails: [],
       additionalRates: [],
+      recurringLineItems: [],
       address: '',
     },
     {
@@ -52,12 +55,14 @@ function seedData(): AppData {
       hourlyRate: 125,
       additionalEmails: [],
       additionalRates: [],
+      recurringLineItems: [],
       address: '',
     },
   ];
 
   return {
     clients,
+    calendarEntries: [],
     settings: {
       businessName: 'Anthony Mercer',
       email: 'hello@anthonymercer.com',
@@ -65,6 +70,7 @@ function seedData(): AppData {
       mailingAddress: '',
       paymentDetails: 'Bank transfer — Chase ****4821\nRouting: 021000021',
       defaultTaxRate: 0,
+      defaultDueDays: 14,
       logo: null,
     },
     nextInvoiceNumber: 5,
@@ -99,7 +105,7 @@ function seedData(): AppData {
         notes: '',
         taxEnabled: false,
         taxRate: 0,
-        status: 'sent',
+        status: 'unpaid',
         createdAt: daysFromNow(-20),
       },
       {
@@ -116,7 +122,7 @@ function seedData(): AppData {
         taxEnabled: true,
         taxRate: 8.5,
         createdAt: daysFromNow(-10),
-        status: 'sent',
+        status: 'unpaid',
       },
       {
         id: 'inv4',

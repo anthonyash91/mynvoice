@@ -3,7 +3,12 @@ import { Plus, Trash2 } from 'lucide-react';
 import { ViewHeader } from '@/components/ViewHeader';
 import { useConfirm } from '@/hooks/useConfirm';
 import { formatCurrency } from '@/lib/calculations';
-import { clientAddressSummary, clientDisplayName, clientRateLines } from '@/lib/client';
+import {
+  clientAddressSummary,
+  clientDisplayName,
+  clientRateLines,
+  clientSecondaryName,
+} from '@/lib/client';
 import type { Client } from '@/types';
 
 interface ClientsViewProps {
@@ -80,6 +85,7 @@ export function ClientsView({
                 const rates = clientRateLines(client);
                 const invoiceCount = getInvoiceCount(client.id);
                 const addressSummary = clientAddressSummary(client.address);
+                const secondaryName = clientSecondaryName(client);
                 return (
                 <tr
                   key={client.id}
@@ -88,14 +94,14 @@ export function ClientsView({
                 >
                   <td className="pl-6 pr-8 py-2.5">
                     <div className="truncate">
-                      {client.owner || client.companyName}
+                      {clientDisplayName(client)}
                       <span className="text-muted-foreground tabular-nums">
                         {' '}
                         ({invoiceCount})
                       </span>
                     </div>
-                    {client.companyName && client.owner && (
-                      <div className="text-muted-foreground truncate">{client.companyName}</div>
+                    {secondaryName && (
+                      <div className="text-muted-foreground truncate">{secondaryName}</div>
                     )}
                   </td>
                   <td className="w-0 pl-2 pr-6 py-2.5 tabular-nums whitespace-nowrap">

@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import type { AppData, Client, Invoice, InvoiceDraft, Settings } from '@/types';
+import type { AppData, CalendarEntry, Client, Invoice, InvoiceDraft, Settings } from '@/types';
 import { clientInvoiceName } from '@/lib/client';
-import { formatInvoiceNumber } from '@/lib/invoice';
 import {
+  monthAnchorDate,
+  missingRecurringLineItems,
+  recurringLineItemToCalendarEntry,
+} from '@/lib/recurring';
+import {
+  deleteCalendarEntryRow,
+  markCalendarEntriesBilled,
+  unbillCalendarEntriesForInvoice,
   deleteClientRow,
   deleteInvoiceRow,
   fetchAppData,
+  insertCalendarEntry,
+  updateCalendarEntryRow,
   importLocalData,
   insertClient,
   saveInvoice,
@@ -28,6 +37,7 @@ function getErrorMessage(err: unknown): string {
 const emptyData: AppData = {
   clients: [],
   invoices: [],
+  calendarEntries: [],
   settings: {
     businessName: '',
     email: '',
@@ -35,6 +45,7 @@ const emptyData: AppData = {
     mailingAddress: '',
     paymentDetails: '',
     defaultTaxRate: 0,
+    defaultDueDays: 14,
     logo: null,
   },
   nextInvoiceNumber: 1,
@@ -129,6 +140,7 @@ export function useStore(user: User | null) {
         invoices: prev.invoices.map((inv) =>
           inv.clientId === clientId ? { ...inv, clientId: '' } : inv
         ),
+        calendarEntries: prev.calendarEntries.filter((entry) => entry.clientId !== clientId),
       }));
     },
     [user]
@@ -146,6 +158,19 @@ export function useStore(user: User | null) {
         existing?.createdAt
       );
 
+      const calendarEntryIds = draft.lineItems
+        .map((item) => item.sourceCalendarEntryId)
+        .filter((id): id is string => Boolean(id));
+
+      let billedEntries: CalendarEntry[] = [];
+      if (calendarEntryIds.length > 0) {
+        billedEntries = await markCalendarEntriesBilled(
+          user.id,
+          calendarEntryIds,
+          invoice.id
+        );
+      }
+
       setData((prev) => {
         const idx = prev.invoices.findIndex((inv) => inv.id === invoice.id);
         const invoices =
@@ -158,10 +183,16 @@ export function useStore(user: User | null) {
             ? [...prev.clients, newClient]
             : prev.clients;
 
+        const billedById = new Map(billedEntries.map((entry) => [entry.id, entry]));
+        const calendarEntries = prev.calendarEntries.map((entry) =>
+          billedById.get(entry.id) ?? entry
+        );
+
         return {
           ...prev,
           clients,
           invoices,
+          calendarEntries,
           nextInvoiceNumber: idx >= 0 ? prev.nextInvoiceNumber : nextInvoiceNumber,
         };
       });
@@ -186,22 +217,112 @@ export function useStore(user: User | null) {
   const deleteInvoice = useCallback(
     async (invoiceId: string) => {
       if (!user) throw new Error('Not signed in');
+      const unbilledEntries = await unbillCalendarEntriesForInvoice(user.id, invoiceId);
       await deleteInvoiceRow(user.id, invoiceId);
+      setData((prev) => {
+        const unbilledById = new Map(unbilledEntries.map((entry) => [entry.id, entry]));
+        return {
+          ...prev,
+          invoices: prev.invoices.filter((inv) => inv.id !== invoiceId),
+          calendarEntries: prev.calendarEntries.map((entry) =>
+            unbilledById.get(entry.id) ?? entry
+          ),
+        };
+      });
+    },
+    [user]
+  );
+
+  const getClientInvoiceCount = useCallback(
+    (clientId: string) => data.invoices.filter((inv) => inv.clientId === clientId).length,
+    [data.invoices]
+  );
+
+  const addCalendarEntry = useCallback(
+    async (entry: Omit<CalendarEntry, 'id'>) => {
+      if (!user) throw new Error('Not signed in');
+      const created = await insertCalendarEntry(user.id, entry);
       setData((prev) => ({
         ...prev,
-        invoices: prev.invoices.filter((inv) => inv.id !== invoiceId),
+        calendarEntries: [...prev.calendarEntries, created].sort((a, b) =>
+          a.date.localeCompare(b.date)
+        ),
+      }));
+      return created;
+    },
+    [user]
+  );
+
+  const deleteCalendarEntry = useCallback(
+    async (entryId: string) => {
+      if (!user) throw new Error('Not signed in');
+      await deleteCalendarEntryRow(user.id, entryId);
+      setData((prev) => ({
+        ...prev,
+        calendarEntries: prev.calendarEntries.filter((entry) => entry.id !== entryId),
       }));
     },
     [user]
   );
 
-  const getNextInvoiceNumber = useCallback(() => {
-    return formatInvoiceNumber(data.nextInvoiceNumber);
-  }, [data.nextInvoiceNumber]);
+  const updateCalendarEntry = useCallback(
+    async (entry: CalendarEntry) => {
+      if (!user) throw new Error('Not signed in');
+      const updated = await updateCalendarEntryRow(user.id, entry);
+      setData((prev) => ({
+        ...prev,
+        calendarEntries: [...prev.calendarEntries]
+          .map((item) => (item.id === updated.id ? updated : item))
+          .sort((a, b) => a.date.localeCompare(b.date)),
+      }));
+      return updated;
+    },
+    [user]
+  );
 
-  const getClientInvoiceCount = useCallback(
-    (clientId: string) => data.invoices.filter((inv) => inv.clientId === clientId).length,
-    [data.invoices]
+  const ensureRecurringCalendarEntriesForMonth = useCallback(
+    async (year: number, month: number) => {
+      if (!user) return;
+
+      const anchor = monthAnchorDate(year, month);
+      const created: CalendarEntry[] = [];
+      let entries = data.calendarEntries;
+
+      for (const client of data.clients) {
+        const missing = missingRecurringLineItems(
+          client.recurringLineItems,
+          client.id,
+          anchor,
+          data.invoices,
+          entries
+        );
+
+        for (const recurring of missing) {
+          const entry = await insertCalendarEntry(
+            user.id,
+            recurringLineItemToCalendarEntry(recurring, client.id, anchor)
+          );
+          created.push(entry);
+          entries = [...entries, entry];
+        }
+      }
+
+      if (created.length === 0) return;
+
+      setData((prev) => {
+        const existingIds = new Set(prev.calendarEntries.map((item) => item.id));
+        const newEntries = created.filter((item) => !existingIds.has(item.id));
+        if (newEntries.length === 0) return prev;
+
+        return {
+          ...prev,
+          calendarEntries: [...prev.calendarEntries, ...newEntries].sort((a, b) =>
+            a.date.localeCompare(b.date)
+          ),
+        };
+      });
+    },
+    [user, data.clients, data.invoices, data.calendarEntries]
   );
 
   return {
@@ -216,7 +337,10 @@ export function useStore(user: User | null) {
     saveInvoiceDraft,
     updateInvoiceStatus,
     deleteInvoice,
-    getNextInvoiceNumber,
     getClientInvoiceCount,
+    addCalendarEntry,
+    updateCalendarEntry,
+    deleteCalendarEntry,
+    ensureRecurringCalendarEntriesForMonth,
   };
 }

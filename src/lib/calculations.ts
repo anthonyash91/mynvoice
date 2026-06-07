@@ -4,6 +4,52 @@ export function lineItemAmount(item: LineItem): number {
   return item.quantity * item.rate;
 }
 
+export interface RateBreakdownRow {
+  rate: number;
+  entryType: 'hourly' | 'fixed';
+  isRecurring: boolean;
+  hours: number | null;
+  total: number;
+}
+
+export function buildRateBreakdown(lineItems: LineItem[]): RateBreakdownRow[] {
+  const groups = new Map<string, RateBreakdownRow>();
+
+  for (const item of lineItems) {
+    const isFixed = item.entryType === 'fixed';
+    const isRecurring = Boolean(item.sourceRecurringLineItemId);
+    const key = `${isRecurring ? 'recurring-' : ''}${isFixed ? 'fixed' : 'hourly'}:${item.rate}`;
+    const amount = lineItemAmount(item);
+    const existing = groups.get(key);
+
+    if (existing) {
+      if (!isFixed) {
+        existing.hours = (existing.hours ?? 0) + item.quantity;
+      }
+      existing.total += amount;
+      continue;
+    }
+
+    groups.set(key, {
+      rate: item.rate,
+      entryType: isFixed ? 'fixed' : 'hourly',
+      isRecurring,
+      hours: isFixed ? null : item.quantity,
+      total: amount,
+    });
+  }
+
+  return [...groups.values()].sort((a, b) => {
+    if (a.entryType !== b.entryType) {
+      return a.entryType === 'hourly' ? -1 : 1;
+    }
+    if (a.isRecurring !== b.isRecurring) {
+      return a.isRecurring ? 1 : -1;
+    }
+    return a.rate - b.rate;
+  });
+}
+
 export function calculateSubtotal(lineItems: LineItem[]): number {
   return lineItems.reduce((sum, item) => sum + lineItemAmount(item), 0);
 }
