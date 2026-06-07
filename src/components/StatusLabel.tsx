@@ -1,0 +1,22 @@
+import { cn } from '@/lib/utils';
+import type { InvoiceStatus } from '@/types';
+import { statusLabel } from '@/lib/invoice';
+
+const STATUS_COLORS: Record<InvoiceStatus, string | null> = {
+  paid: '#34C759',
+  overdue: '#FF3B30',
+  sent: '#0071E3',
+  draft: null,
+};
+
+export function StatusLabel({ status }: { status: InvoiceStatus }) {
+  const color = STATUS_COLORS[status];
+  return (
+    <span
+      className={cn('text-[13px]', color === null && 'text-muted-foreground')}
+      style={color ? { color } : undefined}
+    >
+      {statusLabel(status)}
+    </span>
+  );
+}

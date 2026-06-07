@@ -1,0 +1,338 @@
+@import "tailwindcss" source(none);
+@source "../src";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-row-hover: var(--row-hover);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+}
+
+:root {
+  --radius: 6px;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.16 0 0);
+  --surface: oklch(1 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0 0);
+
+  --primary: oklch(0.58 0.18 255);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.16 0 0);
+
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.16 0 0);
+
+  --destructive: oklch(0.62 0.22 25);
+  --destructive-foreground: oklch(1 0 0);
+
+  --success: oklch(0.72 0.17 145);
+  --success-foreground: oklch(1 0 0);
+
+  --warning: oklch(0.7 0.15 60);
+  --warning-foreground: oklch(0.16 0 0);
+
+  --row-hover: oklch(0.97 0 0);
+
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.58 0.18 255);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+    box-shadow: none !important;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      border-color 150ms ease,
+      opacity 150ms ease;
+  }
+}
+
+@keyframes panel-slide-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-panel-in {
+  animation: panel-slide-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 180ms ease-out both;
+}
+
+/* Invoice document — shared by panel + PDF (explicit hex for canvas fidelity) */
+.invoice-print-viewport {
+  flex: 1;
+  overflow: auto;
+  padding: 40px;
+}
+
+.invoice-print {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #111111;
+  background: #ffffff;
+}
+
+.invoice-print-muted {
+  color: #6e6e73;
+}
+
+.invoice-print-strong {
+  font-weight: 500;
+  color: #111111;
+}
+
+.invoice-print-mono {
+  font-family: var(--font-mono);
+  margin-top: 4px;
+}
+
+.invoice-print-right {
+  text-align: right;
+}
+
+.invoice-print-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6e6e73;
+}
+
+.invoice-print-label-spaced {
+  margin-bottom: 8px;
+}
+
+.invoice-print-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  margin-bottom: 12px;
+}
+
+.invoice-print-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 32px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.invoice-print-section {
+  padding-top: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.invoice-print-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  padding-top: 32px;
+  padding-bottom: 32px;
+}
+
+.invoice-print-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.invoice-print-lines-header,
+.invoice-print-line-row {
+  display: grid;
+  grid-template-columns: 1fr 40px 80px 80px;
+  gap: 12px;
+}
+
+.invoice-print-lines-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6e6e73;
+  padding-bottom: 8px;
+}
+
+.invoice-print-lines-header div:nth-child(n + 2),
+.invoice-print-line-row .invoice-print-num {
+  text-align: right;
+}
+
+.invoice-print-line-row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-top: 1px solid rgba(229, 229, 229, 0.6);
+}
+
+.invoice-print-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-print-totals-wrap {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  border-bottom: none;
+}
+
+.invoice-print-totals {
+  width: 256px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.invoice-print-total-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.invoice-print-total-grand {
+  padding-top: 8px;
+  border-top: 1px solid #e5e5e5;
+  margin-top: 4px;
+}
+
+.invoice-print-footer {
+  padding-top: 24px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.invoice-print-footer-gap {
+  margin-top: 24px;
+}
+
+.invoice-print-body {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.invoice-print-capture-root {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.invoice-print-capture {
+  width: 100%;
+  background: #ffffff;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .invoice-print,
+  .invoice-print * {
+    visibility: visible;
+  }
+  .invoice-print {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 48px;
+    background: white;
+    border: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
