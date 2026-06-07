@@ -14,10 +14,46 @@ function daysFromNow(days: number): string {
 
 function seedData(): AppData {
   const clients = [
-    { id: 'c1', name: 'Mia Chen', company: 'Chen Studio', email: 'mia@chenstudio.co' },
-    { id: 'c2', name: 'James Okonkwo', company: 'Northline Media', email: 'james@northline.io' },
-    { id: 'c3', name: 'Sarah Whitfield', company: 'Whitfield Consulting', email: 'sarah@whitfield.com' },
-    { id: 'c4', name: 'David Park', company: 'Park & Associates', email: 'david@parkassoc.com' },
+    {
+      id: 'c1',
+      companyName: 'Chen Studio',
+      owner: 'Mia Chen',
+      primaryEmail: 'mia@chenstudio.co',
+      hourlyRate: 150,
+      additionalEmails: [],
+      additionalRates: [],
+      address: '',
+    },
+    {
+      id: 'c2',
+      companyName: 'Northline Media',
+      owner: 'James Okonkwo',
+      primaryEmail: 'james@northline.io',
+      hourlyRate: 175,
+      additionalEmails: [],
+      additionalRates: [],
+      address: '',
+    },
+    {
+      id: 'c3',
+      companyName: 'Whitfield Consulting',
+      owner: 'Sarah Whitfield',
+      primaryEmail: 'sarah@whitfield.com',
+      hourlyRate: 350,
+      additionalEmails: [],
+      additionalRates: [],
+      address: '',
+    },
+    {
+      id: 'c4',
+      companyName: 'Park & Associates',
+      owner: 'David Park',
+      primaryEmail: 'david@parkassoc.com',
+      hourlyRate: 125,
+      additionalEmails: [],
+      additionalRates: [],
+      address: '',
+    },
   ];
 
   return {
@@ -25,6 +61,8 @@ function seedData(): AppData {
     settings: {
       businessName: 'Anthony Mercer',
       email: 'hello@anthonymercer.com',
+      businessAddress: '',
+      mailingAddress: '',
       paymentDetails: 'Bank transfer — Chase ****4821\nRouting: 021000021',
       defaultTaxRate: 0,
       logo: null,

@@ -19,26 +19,28 @@ export function InvoicesView({ invoices, onOpenInvoice, onNewInvoice }: Invoices
     <div>
       <ViewHeader title="Invoices" subtitle={`${rows.length} total`} />
 
-      {rows.length === 0 ? (
-        <div className="px-8 py-16 text-[13px] text-muted-foreground">
-          No invoices yet.{' '}
-          <button onClick={onNewInvoice} className="text-primary hover:underline">
-            Create the first one.
-          </button>
-        </div>
-      ) : (
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="text-muted-foreground border-b border-border">
-              <th className="text-left font-normal px-8 py-2.5">Client</th>
-              <th className="text-left font-normal py-2.5">Invoice</th>
-              <th className="text-right font-normal py-2.5">Amount</th>
-              <th className="text-left font-normal pl-8 py-2.5">Due</th>
-              <th className="text-left font-normal px-8 py-2.5">Status</th>
+      <table className="w-full text-[13px]">
+        <thead>
+          <tr className="text-muted-foreground border-b border-border">
+            <th className="text-left font-normal px-8 py-2.5">Client</th>
+            <th className="text-left font-normal py-2.5">Invoice</th>
+            <th className="text-left font-normal py-2.5">Amount</th>
+            <th className="text-left font-normal pl-8 py-2.5">Due</th>
+            <th className="text-left font-normal px-8 py-2.5">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="px-8 pt-4 pb-2.5 text-muted-foreground">
+                No invoices yet.{' '}
+                <button onClick={onNewInvoice} className="text-primary hover:underline">
+                  Create the first one.
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((inv) => {
+          ) : (
+            rows.map((inv) => {
               const status = resolveStatus(inv);
               const { total } = calculateTotal(inv.lineItems, inv.taxEnabled, inv.taxRate);
               return (
@@ -49,17 +51,17 @@ export function InvoicesView({ invoices, onOpenInvoice, onNewInvoice }: Invoices
                 >
                   <td className="px-8 py-2.5">{inv.clientName}</td>
                   <td className="py-2.5 font-mono text-muted-foreground">{inv.number}</td>
-                  <td className="py-2.5 text-right tabular-nums">{formatCurrency(total)}</td>
+                  <td className="py-2.5 tabular-nums">{formatCurrency(total)}</td>
                   <td className="pl-8 py-2.5 text-muted-foreground">{formatDate(inv.dueDate)}</td>
                   <td className="px-8 py-2.5">
                     <StatusLabel status={status} />
                   </td>
                 </tr>
               );
-            })}
-          </tbody>
-        </table>
-      )}
+            })
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

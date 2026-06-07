@@ -1,117 +1,263 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { cn } from '@/lib/utils';
+import { AppPanel } from '@/components/AppPanel';
 import { Sidebar } from '@/components/Sidebar';
 import { InvoicePanel } from '@/components/InvoicePanel';
-import { ClientPanel } from '@/components/ClientPanel';
+import { EditClientPanel } from '@/components/EditClientPanel';
 import { NewClientPanel } from '@/components/NewClientPanel';
 import { NewInvoicePanel } from '@/components/NewInvoicePanel';
 import { InvoicesView } from '@/views/InvoicesView';
 import { ClientsView } from '@/views/ClientsView';
 import { SettingsView } from '@/views/SettingsView';
+import { LoginView } from '@/views/LoginView';
+import { useAuth } from '@/hooks/useAuth';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useStore } from '@/hooks/useStore';
-import type { Panel, View } from '@/types';
+import { activeViewFromPanel, type Panel, type View } from '@/types';
 
-export default function App() {
+const PANEL_ANIMATION_MS = 220;
+
+function SetupView() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background px-6">
+      <div className="w-full max-w-md text-[13px] space-y-3">
+        <h1 className="text-[15px] font-medium">MyNvoice</h1>
+        <p className="text-muted-foreground">
+          Supabase is not configured. Copy <code className="font-mono">.env.example</code> to{' '}
+          <code className="font-mono">.env</code> and add your project URL and anon key.
+        </p>
+        <p className="text-muted-foreground">
+          Then run the SQL in <code className="font-mono">supabase/schema.sql</code> in your
+          Supabase dashboard.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AppShell() {
+  const { user, signOut } = useAuth();
   const {
     data,
+    loading,
+    error,
+    refresh,
     updateSettings,
     addClient,
+    updateClient,
+    deleteClient,
     saveInvoiceDraft,
     updateInvoiceStatus,
+    deleteInvoice,
     getNextInvoiceNumber,
     getClientInvoiceCount,
-  } = useStore();
+  } = useStore(user);
 
-  const [view, setView] = useState<View>('invoices');
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, setPanelState] = useState<Panel | null>(null);
+  const [panelClosing, setPanelClosing] = useState(false);
+  const panelRef = useRef<Panel | null>(null);
+  const panelClosingRef = useRef(false);
+  const panelCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  panelRef.current = panel;
+  panelClosingRef.current = panelClosing;
 
-  const closePanel = useCallback(() => setPanel(null), []);
+  useEffect(
+    () => () => {
+      if (panelCloseTimeoutRef.current) clearTimeout(panelCloseTimeoutRef.current);
+    },
+    []
+  );
 
-  const goto = (v: View) => {
-    setPanel(null);
-    setView(v);
-  };
+  const setPanel = useCallback((next: Panel | null) => {
+    if (panelCloseTimeoutRef.current) {
+      clearTimeout(panelCloseTimeoutRef.current);
+      panelCloseTimeoutRef.current = null;
+    }
 
-  const openInvoice = useCallback((id: string) => setPanel({ kind: 'invoice', id }), []);
-  const openClient = useCallback((id: string) => setPanel({ kind: 'client', id }), []);
-  const openNewClient = useCallback(() => setPanel({ kind: 'new-client' }), []);
-  const openNewInvoice = useCallback(() => setPanel({ kind: 'new-invoice' }), []);
+    if (next === null) {
+      if (!panelRef.current || panelClosingRef.current) return;
+      setPanelClosing(true);
+      panelCloseTimeoutRef.current = setTimeout(() => {
+        setPanelState(null);
+        setPanelClosing(false);
+        panelCloseTimeoutRef.current = null;
+      }, PANEL_ANIMATION_MS);
+      return;
+    }
+
+    setPanelClosing(false);
+    setPanelState(next);
+  }, []);
+
+  const goto = useCallback((next: View) => {
+    if (next === 'invoices') {
+      setPanel(null);
+    } else if (next === 'clients') {
+      setPanel({ kind: 'clients' });
+    } else if (next === 'settings') {
+      setPanel({ kind: 'settings' });
+    }
+  }, [setPanel]);
+
+  const openInvoice = useCallback((id: string) => setPanel({ kind: 'invoice', id }), [setPanel]);
+  const openClient = useCallback((id: string) => setPanel({ kind: 'edit-client', id }), [setPanel]);
+  const openNewClient = useCallback(() => setPanel({ kind: 'new-client' }), [setPanel]);
+  const openNewInvoice = useCallback(() => setPanel({ kind: 'new-invoice' }), [setPanel]);
 
   const panelInvoice =
-    panel?.kind === 'invoice'
-      ? data.invoices.find((i) => i.id === panel.id)
-      : undefined;
+    panel?.kind === 'invoice' ? data.invoices.find((i) => i.id === panel.id) : undefined;
 
   const panelClient =
-    panel?.kind === 'client' ? data.clients.find((c) => c.id === panel.id) : undefined;
+    panel?.kind === 'edit-client'
+      ? data.clients.find((c) => c.id === panel.id)
+      : undefined;
 
   const invoiceClient = panelInvoice
     ? data.clients.find((c) => c.id === panelInvoice.clientId) ?? null
     : null;
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-[13px] text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 gap-4">
+        <div className="text-[13px] text-destructive max-w-md text-center">{error}</div>
+        <button
+          onClick={() => refresh()}
+          className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
+    <ConfirmProvider>
     <div className="flex h-screen w-full bg-background text-foreground">
-      <Sidebar activeView={view} onNavigate={goto} onNewInvoice={openNewInvoice} />
+      <Sidebar
+        activeView={activeViewFromPanel(panel)}
+        onNavigate={goto}
+        onNewInvoice={openNewInvoice}
+        onSignOut={signOut}
+      />
 
       <div className="flex-1 relative min-w-0">
         <main className="absolute inset-0 overflow-auto">
-          {view === 'invoices' && (
-            <InvoicesView
-              invoices={data.invoices}
-              onOpenInvoice={openInvoice}
-              onNewInvoice={openNewInvoice}
-            />
-          )}
-          {view === 'clients' && (
-            <ClientsView
-              clients={data.clients}
-              getInvoiceCount={getClientInvoiceCount}
-              onOpenClient={openClient}
-              onAddClient={openNewClient}
-            />
-          )}
-          {view === 'settings' && (
-            <SettingsView settings={data.settings} onSave={updateSettings} />
-          )}
+          <InvoicesView
+            invoices={data.invoices}
+            onOpenInvoice={openInvoice}
+            onNewInvoice={openNewInvoice}
+          />
         </main>
 
         {panel && (
-          <aside className="absolute top-0 right-0 bottom-0 w-[480px] border-l border-border bg-background overflow-auto shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.08)] z-10 animate-panel-in">
+          <>
+            <button
+              type="button"
+              aria-label="Close panel"
+              disabled={panelClosing}
+              onClick={() => setPanel(null)}
+              className={cn(
+                'fixed inset-0 z-[9] bg-foreground/20',
+                panelClosing ? 'animate-fade-out' : 'animate-fade-in'
+              )}
+            />
+            <AppPanel closing={panelClosing}>
+            {panel.kind === 'clients' && (
+              <ClientsView
+                clients={data.clients}
+                getInvoiceCount={getClientInvoiceCount}
+                onOpenClient={openClient}
+                onAddClient={openNewClient}
+                onDeleteClient={deleteClient}
+                onClose={() => setPanel(null)}
+              />
+            )}
+            {panel.kind === 'settings' && (
+              <SettingsView
+                settings={data.settings}
+                onSave={updateSettings}
+                onClose={() => setPanel(null)}
+              />
+            )}
             {panel.kind === 'invoice' && panelInvoice && (
               <InvoicePanel
                 invoice={panelInvoice}
                 client={invoiceClient}
                 settings={data.settings}
-                onClose={closePanel}
+                onClose={() => setPanel(null)}
                 onMarkSent={() => updateInvoiceStatus(panelInvoice.id, 'sent')}
                 onMarkPaid={() => updateInvoiceStatus(panelInvoice.id, 'paid')}
+                onDelete={async () => {
+                  await deleteInvoice(panelInvoice.id);
+                  setPanel(null);
+                }}
               />
             )}
-            {panel.kind === 'client' && panelClient && (
-              <ClientPanel
+            {panel.kind === 'edit-client' && panelClient && (
+              <EditClientPanel
+                key={panelClient.id}
                 client={panelClient}
-                invoices={data.invoices}
-                onClose={closePanel}
-                onOpenInvoice={(id) => setPanel({ kind: 'invoice', id })}
+                onClose={() => setPanel({ kind: 'clients' })}
+                onSave={updateClient}
+                onDelete={async () => {
+                  await deleteClient(panelClient.id);
+                  setPanel({ kind: 'clients' });
+                }}
               />
             )}
             {panel.kind === 'new-client' && (
-              <NewClientPanel onClose={closePanel} onSave={addClient} />
+              <NewClientPanel
+                onClose={() => setPanel({ kind: 'clients' })}
+                onSave={addClient}
+              />
             )}
             {panel.kind === 'new-invoice' && (
               <NewInvoicePanel
                 clients={data.clients}
                 settings={data.settings}
                 initialNumber={getNextInvoiceNumber()}
-                onClose={closePanel}
-                onSave={(draft, status) => {
-                  const saved = saveInvoiceDraft(draft, status);
+                onClose={() => setPanel(null)}
+                onSave={async (draft, status) => {
+                  const saved = await saveInvoiceDraft(draft, status);
                   setPanel({ kind: 'invoice', id: saved.id });
                 }}
               />
             )}
-          </aside>
+          </AppPanel>
+          </>
         )}
       </div>
     </div>
+    </ConfirmProvider>
   );
+}
+
+export default function App() {
+  const { user, loading, signIn, signUp, isConfigured } = useAuth();
+
+  if (!isConfigured) {
+    return <SetupView />;
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-[13px] text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginView onSignIn={signIn} onSignUp={signUp} />;
+  }
+
+  return <AppShell />;
 }

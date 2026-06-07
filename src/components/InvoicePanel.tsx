@@ -1,4 +1,6 @@
-import { CheckCircle2, Download, Send, X } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, Download, Send, Trash2, X } from 'lucide-react';
+import { useConfirm } from '@/hooks/useConfirm';
 import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
 import { StatusLabel } from '@/components/StatusLabel';
 import { downloadInvoicePdf } from '@/lib/pdf';
@@ -12,6 +14,7 @@ interface InvoicePanelProps {
   onClose: () => void;
   onMarkSent: () => void;
   onMarkPaid: () => void;
+  onDelete: () => Promise<void>;
 }
 
 export function InvoicePanel({
@@ -21,20 +24,41 @@ export function InvoicePanel({
   onClose,
   onMarkSent,
   onMarkPaid,
+  onDelete,
 }: InvoicePanelProps) {
+  const confirm = useConfirm();
   const status = resolveStatus(invoice);
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    const ok = await confirm({
+      title: `Delete ${invoice.number}?`,
+      description: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="h-14 px-6 border-b border-border flex items-center justify-between no-print">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+    <div className="inline-flex flex-col h-full max-w-full">
+      <div className="h-14 w-full px-6 border-b border-border flex items-center justify-between no-print shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onClose}
+            className="inline-flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
-          <span className="font-mono text-[13px]">{invoice.number}</span>
+          <span className="font-mono text-[13px] leading-none">{invoice.number}</span>
           <StatusLabel status={status} />
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {status === 'draft' && (
             <button
               onClick={onMarkSent}
@@ -56,6 +80,13 @@ export function InvoicePanel({
             className="h-7 px-2 text-[13px] text-foreground rounded hover:bg-secondary flex items-center gap-1"
           >
             <Download className="h-3.5 w-3.5" /> Download PDF
+          </button>
+          <button
+            onClick={remove}
+            disabled={deleting}
+            className="h-7 px-2 text-[13px] text-destructive rounded hover:bg-secondary flex items-center gap-1 disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> {deleting ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </div>

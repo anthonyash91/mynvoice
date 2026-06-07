@@ -13,7 +13,7 @@ export function StatusLabel({ status }: { status: InvoiceStatus }) {
   const color = STATUS_COLORS[status];
   return (
     <span
-      className={cn('text-[13px]', color === null && 'text-muted-foreground')}
+      className={cn('text-[13px] leading-none', color === null && 'text-muted-foreground')}
       style={color ? { color } : undefined}
     >
       {statusLabel(status)}

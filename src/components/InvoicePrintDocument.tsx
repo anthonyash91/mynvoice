@@ -23,6 +23,9 @@ export function InvoicePrintDocument({
           )}
           <div className="invoice-print-strong">{settings.businessName}</div>
           <div className="invoice-print-muted">{settings.email}</div>
+          {settings.businessAddress && (
+            <div className="invoice-print-muted whitespace-pre-line">{settings.businessAddress}</div>
+          )}
         </div>
         <div className="invoice-print-right">
           <div className="invoice-print-label">Invoice</div>
@@ -33,9 +36,16 @@ export function InvoicePrintDocument({
       <section className="invoice-print-section invoice-print-grid-2">
         <div>
           <div className="invoice-print-label invoice-print-label-spaced">Billed to</div>
-          <div className="invoice-print-strong">{client?.name ?? invoice.clientName}</div>
-          {client?.company && <div className="invoice-print-muted">{client.company}</div>}
-          {client?.email && <div className="invoice-print-muted">{client.email}</div>}
+          <div className="invoice-print-strong">
+            {client?.owner || client?.companyName || invoice.clientName}
+          </div>
+          {client?.companyName && client?.owner && (
+            <div className="invoice-print-muted">{client.companyName}</div>
+          )}
+          {client?.primaryEmail && (
+            <div className="invoice-print-muted">{client.primaryEmail}</div>
+          )}
+          {client?.address && <div className="invoice-print-muted">{client.address}</div>}
         </div>
         <div className="invoice-print-right invoice-print-dates">
           <div>

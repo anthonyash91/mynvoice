@@ -4,13 +4,14 @@ import { Field } from '@/components/Field';
 import { Switch } from '@/components/ui/switch';
 import type { Client, InvoiceDraft, LineItem, Settings } from '@/types';
 import { calculateTotal, formatCurrency } from '@/lib/calculations';
+import { clientInvoiceName, clientMatchesQuery } from '@/lib/client';
 
 interface NewInvoicePanelProps {
   clients: Client[];
   settings: Settings;
   initialNumber: string;
   onClose: () => void;
-  onSave: (draft: InvoiceDraft, status: 'draft' | 'sent') => void;
+  onSave: (draft: InvoiceDraft, status: 'draft' | 'sent') => Promise<void>;
 }
 
 function today(): string {
@@ -47,20 +48,14 @@ export function NewInvoicePanel({
   const selectedClient = clients.find((c) => c.id === clientId);
   const suggestions = useMemo(() => {
     if (!clientQuery || clientId) return [];
-    const q = clientQuery.toLowerCase();
-    return clients
-      .filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) || c.company?.toLowerCase().includes(q)
-      )
-      .slice(0, 5);
+    return clients.filter((c) => clientMatchesQuery(c, clientQuery)).slice(0, 5);
   }, [clientQuery, clients, clientId]);
 
   const totals = calculateTotal(lineItems, taxOn, taxRate);
 
   const buildDraft = (): InvoiceDraft => ({
     clientId,
-    clientName: selectedClient?.name ?? clientQuery.trim(),
+    clientName: selectedClient ? clientInvoiceName(selectedClient) : clientQuery.trim(),
     number,
     issueDate,
     dueDate,
@@ -73,32 +68,42 @@ export function NewInvoicePanel({
   const updateItem = (id: string, patch: Partial<LineItem>) =>
     setLineItems((arr) => arr.map((i) => (i.id === id ? { ...i, ...patch } : i)));
 
-  const handleSave = (status: 'draft' | 'sent') => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (status: 'draft' | 'sent') => {
     const draft = buildDraft();
     if (!draft.clientName.trim()) return;
-    onSave(draft, status);
+    setSaving(true);
+    try {
+      await onSave(draft, status);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="h-14 px-6 border-b border-border flex items-center justify-between no-print">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+    <div className="inline-flex flex-col h-full max-w-full">
+      <div className="h-14 w-full px-6 border-b border-border flex items-center justify-between no-print shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={onClose}
+            className="inline-flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
-          <span className="text-[15px] font-medium">New invoice</span>
-          <span className="font-mono text-[13px] text-muted-foreground">{number}</span>
+          <span className="text-[15px] font-medium leading-none">New invoice</span>
+          <span className="font-mono text-[13px] text-muted-foreground leading-none">{number}</span>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-6 py-6 space-y-6">
+      <div className="flex-1 overflow-auto px-6 py-6 space-y-6 min-w-[400px]">
         <Field label="Client">
           {selectedClient ? (
             <div className="flex items-center justify-between border border-border rounded px-3 py-1.5 text-[13px]">
               <span>
-                {selectedClient.name}
-                {selectedClient.company && (
-                  <span className="text-muted-foreground"> · {selectedClient.company}</span>
+                {selectedClient.owner || selectedClient.companyName}
+                {selectedClient.companyName && selectedClient.owner && (
+                  <span className="text-muted-foreground"> · {selectedClient.companyName}</span>
                 )}
               </span>
               <button
@@ -127,13 +132,13 @@ export function NewInvoicePanel({
                       type="button"
                       onClick={() => {
                         setClientId(c.id);
-                        setClientQuery(c.name);
+                        setClientQuery(clientInvoiceName(c));
                       }}
                       className="block w-full text-left px-3 py-1.5 text-[13px] hover:bg-secondary"
                     >
-                      {c.name}
-                      {c.company && (
-                        <span className="text-muted-foreground"> · {c.company}</span>
+                      {c.owner || c.companyName}
+                      {c.companyName && c.owner && (
+                        <span className="text-muted-foreground"> · {c.companyName}</span>
                       )}
                     </button>
                   ))}
@@ -176,9 +181,9 @@ export function NewInvoicePanel({
           <div className="border border-border rounded overflow-hidden">
             <div className="grid grid-cols-[1fr_80px_100px_100px_28px] gap-2 px-3 py-1.5 text-[12px] text-muted-foreground border-b border-border bg-secondary">
               <div>Description</div>
-              <div className="text-right">Qty</div>
-              <div className="text-right">Rate</div>
-              <div className="text-right">Amount</div>
+              <div>Qty</div>
+              <div>Rate</div>
+              <div>Amount</div>
               <div />
             </div>
             {lineItems.map((item) => (
@@ -199,7 +204,7 @@ export function NewInvoicePanel({
                   onChange={(e) =>
                     updateItem(item.id, { quantity: Number(e.target.value) || 0 })
                   }
-                  className="h-7 text-right bg-transparent outline-none tabular-nums"
+                  className="h-7 bg-transparent outline-none tabular-nums"
                 />
                 <input
                   type="number"
@@ -207,9 +212,9 @@ export function NewInvoicePanel({
                   step={0.01}
                   value={item.rate}
                   onChange={(e) => updateItem(item.id, { rate: Number(e.target.value) || 0 })}
-                  className="h-7 text-right bg-transparent outline-none tabular-nums"
+                  className="h-7 bg-transparent outline-none tabular-nums"
                 />
-                <div className="text-right tabular-nums">
+                <div className="tabular-nums">
                   {formatCurrency(item.quantity * item.rate)}
                 </div>
                 <button
@@ -273,18 +278,20 @@ export function NewInvoicePanel({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-border">
+        <div className="flex justify-end gap-2 border-t border-border pt-[22px]">
           <button
             onClick={() => handleSave('draft')}
-            className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary"
+            disabled={saving}
+            className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary disabled:opacity-50"
           >
-            Save as Draft
+            {saving ? 'Saving…' : 'Save as Draft'}
           </button>
           <button
             onClick={() => handleSave('sent')}
-            className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium"
+            disabled={saving}
+            className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
           >
-            Preview & Send
+            {saving ? 'Saving…' : 'Preview & Send'}
           </button>
         </div>
       </div>
