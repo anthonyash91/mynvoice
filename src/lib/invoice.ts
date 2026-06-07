@@ -32,7 +32,11 @@ export function nextInvoiceNumberForClient(
 }
 
 export function resolveStatus(invoice: Invoice): InvoiceStatus {
-  if (invoice.status === 'paid' || invoice.status === 'draft') {
+  if (
+    invoice.status === 'paid' ||
+    invoice.status === 'draft' ||
+    invoice.status === 'payment_sent'
+  ) {
     return invoice.status;
   }
   if (!invoice.dueDate) return invoice.status;
@@ -46,12 +50,27 @@ export function resolveStatus(invoice: Invoice): InvoiceStatus {
   return invoice.status;
 }
 
+export function todayDateString(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+export function formatPaymentDate(paidAt: string | null | undefined): string {
+  if (!paidAt) return '—';
+  const date = new Date(`${paidAt}T00:00:00`);
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 export function statusLabel(status: InvoiceStatus): string {
   const labels: Record<InvoiceStatus, string> = {
     draft: 'Draft',
     unpaid: 'Unpaid',
     paid: 'Paid',
     overdue: 'Overdue',
+    payment_sent: 'Payment sent',
   };
   return labels[status];
 }

@@ -1,0 +1,5 @@
+[functions.send-invoice]
+verify_jwt = true
+
+[functions.invoice-public]
+verify_jwt = false

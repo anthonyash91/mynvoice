@@ -14,6 +14,7 @@ export function emptyClientDraft(): ClientDraft {
     additionalEmails: [],
     additionalRates: [],
     recurringLineItems: [],
+    recurringCalendarExclusions: [],
     address: '',
   };
 }

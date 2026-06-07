@@ -1,10 +1,12 @@
-export type InvoiceStatus = 'draft' | 'unpaid' | 'paid' | 'overdue';
+export type InvoiceStoredStatus = 'draft' | 'unpaid' | 'paid' | 'payment_sent';
+export type InvoiceStatus = InvoiceStoredStatus | 'overdue';
 
-export type View = 'invoices' | 'clients' | 'calendar' | 'settings';
+export type View = 'invoices' | 'clients' | 'calendar' | 'settings' | 'templates';
 
 export type Panel =
   | { kind: 'clients' }
   | { kind: 'settings' }
+  | { kind: 'templates' }
   | { kind: 'calendar-day'; date: string }
   | { kind: 'invoice'; id: string }
   | { kind: 'edit-client'; id: string }
@@ -56,7 +58,9 @@ export interface Invoice {
   notes: string;
   taxEnabled: boolean;
   taxRate: number;
-  status: InvoiceStatus;
+  status: InvoiceStoredStatus;
+  publicToken: string | null;
+  paidAt: string | null;
   createdAt: string;
 }
 
@@ -65,6 +69,17 @@ export interface ClientRate {
   label: string;
   rate: number;
 }
+
+export interface RecurringCalendarExclusion {
+  clientId: string;
+  recurringLineItemId: string;
+  monthKey: string;
+}
+
+export type ClientRecurringCalendarExclusion = Omit<
+  RecurringCalendarExclusion,
+  'clientId'
+>;
 
 export interface Client {
   id: string;
@@ -75,7 +90,25 @@ export interface Client {
   additionalEmails: string[];
   additionalRates: ClientRate[];
   recurringLineItems: RecurringLineItem[];
+  recurringCalendarExclusions: ClientRecurringCalendarExclusion[];
   address: string;
+}
+
+export type EmailTemplateKind = 'unpaid' | 'reminder' | 'late' | 'payment_received';
+
+export interface EmailTemplate {
+  subject: string;
+  html: string;
+  css: string;
+  /** @deprecated Legacy combined body; migrated on load */
+  body?: string;
+}
+
+export interface EmailTemplates {
+  unpaid: EmailTemplate;
+  reminder: EmailTemplate;
+  late: EmailTemplate;
+  payment_received: EmailTemplate;
 }
 
 export interface Settings {
@@ -87,12 +120,14 @@ export interface Settings {
   defaultTaxRate: number;
   defaultDueDays: number;
   logo: string | null;
+  emailTemplates: EmailTemplates;
 }
 
 export interface AppData {
   invoices: Invoice[];
   clients: Client[];
   calendarEntries: CalendarEntry[];
+  recurringCalendarExclusions: RecurringCalendarExclusion[];
   settings: Settings;
   nextInvoiceNumber: number;
 }
@@ -119,6 +154,7 @@ export function activeViewFromPanel(panel: Panel | null): View {
     return 'clients';
   }
   if (panel.kind === 'settings') return 'settings';
+  if (panel.kind === 'templates') return 'templates';
   if (panel.kind === 'calendar-day') return 'calendar';
   return 'invoices';
 }

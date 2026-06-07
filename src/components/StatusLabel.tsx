@@ -6,6 +6,7 @@ const STATUS_COLORS: Record<InvoiceStatus, string | null> = {
   paid: '#34C759',
   overdue: '#FF3B30',
   unpaid: '#0071E3',
+  payment_sent: '#FF9500',
   draft: null,
 };
 

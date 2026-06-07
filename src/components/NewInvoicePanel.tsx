@@ -5,7 +5,15 @@ import { ClientCombobox } from '@/components/ClientCombobox';
 import { Field } from '@/components/Field';
 import { Tooltip } from '@/components/Tooltip';
 import { Switch } from '@/components/ui/switch';
-import type { CalendarEntry, Client, Invoice, InvoiceDraft, LineItem, Settings } from '@/types';
+import type {
+  CalendarEntry,
+  Client,
+  Invoice,
+  InvoiceDraft,
+  LineItem,
+  RecurringCalendarExclusion,
+  Settings,
+} from '@/types';
 import { calculateTotal, formatCurrency, formatDate } from '@/lib/calculations';
 import { formatDurationQuantity } from '@/lib/duration';
 import { clientInvoiceName } from '@/lib/client';
@@ -25,12 +33,14 @@ import {
   missingRecurringLineItems,
   recurringLineItemToCalendarEntry,
 } from '@/lib/recurring';
+import { recurringExclusionsForClient } from '@/lib/recurringExclusions';
 import { cn } from '@/lib/utils';
 
 interface NewInvoicePanelProps {
   clients: Client[];
   invoices: Invoice[];
   calendarEntries: CalendarEntry[];
+  recurringCalendarExclusions: RecurringCalendarExclusion[];
   settings: Settings;
   onClose: () => void;
   onSave: (draft: InvoiceDraft, status: 'draft' | 'unpaid') => Promise<void>;
@@ -128,6 +138,7 @@ export function NewInvoicePanel({
   clients,
   invoices,
   calendarEntries,
+  recurringCalendarExclusions,
   settings,
   onClose,
   onSave,
@@ -213,7 +224,8 @@ export function NewInvoicePanel({
         resolvedClientId,
         issueDate,
         invoices,
-        calendarEntries
+        calendarEntries,
+        recurringExclusionsForClient(invoiceClient, recurringCalendarExclusions)
       );
       if (missing.length === 0 || applyingRecurringRef.current) return;
 
@@ -239,6 +251,7 @@ export function NewInvoicePanel({
     invoiceClient,
     invoices,
     calendarEntries,
+    recurringCalendarExclusions,
     onAddCalendarEntry,
   ]);
 

@@ -115,6 +115,18 @@ export function billedCalendarEntries(entries: CalendarEntry[]): CalendarEntry[]
   return entries.filter((entry) => isCalendarEntryBilled(entry));
 }
 
+export function isRecurringCalendarEntry(entry: CalendarEntry): boolean {
+  return Boolean(entry.recurringLineItemId);
+}
+
+export function recurringUnbilledCalendarEntries(entries: CalendarEntry[]): CalendarEntry[] {
+  return unbilledCalendarEntries(entries).filter(isRecurringCalendarEntry);
+}
+
+export function nonRecurringUnbilledCalendarEntries(entries: CalendarEntry[]): CalendarEntry[] {
+  return unbilledCalendarEntries(entries).filter((entry) => !isRecurringCalendarEntry(entry));
+}
+
 export function unbilledCalendarTotal(entries: CalendarEntry[]): number {
   return unbilledCalendarEntries(entries).reduce(
     (sum, entry) => sum + calendarEntryAmount(entry),

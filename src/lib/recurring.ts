@@ -1,5 +1,13 @@
-import { monthKeyFromDate, parseDateString, toDateString } from '@/lib/calendar';
-import type { CalendarEntry, Client, Invoice, RecurringLineItem } from '@/types';
+import { dayOfMonth, monthKeyFromDate, parseDateString, toDateString } from '@/lib/calendar';
+import { recurringExclusionsForClient } from '@/lib/recurringExclusions';
+import type {
+  CalendarEntry,
+  Client,
+  ClientRecurringCalendarExclusion,
+  Invoice,
+  RecurringCalendarExclusion,
+  RecurringLineItem,
+} from '@/types';
 
 export function emptyRecurringLineItem(): RecurringLineItem {
   return {
@@ -23,13 +31,68 @@ export function recurringDateForMonth(issueDate: string, dayOfMonth: number): st
   return toDateString(year, month, day);
 }
 
+export function isRecurringExcludedForMonth(
+  recurringId: string,
+  clientId: string,
+  monthKey: string,
+  exclusions: RecurringCalendarExclusion[]
+): boolean {
+  return exclusions.some(
+    (exclusion) =>
+      exclusion.clientId === clientId &&
+      exclusion.recurringLineItemId === recurringId &&
+      exclusion.monthKey === monthKey
+  );
+}
+
+export function addClientRecurringCalendarExclusion(
+  exclusions: ClientRecurringCalendarExclusion[],
+  recurringLineItemId: string,
+  monthKey: string
+): ClientRecurringCalendarExclusion[] {
+  if (
+    exclusions.some(
+      (exclusion) =>
+        exclusion.recurringLineItemId === recurringLineItemId &&
+        exclusion.monthKey === monthKey
+    )
+  ) {
+    return exclusions;
+  }
+
+  return [...exclusions, { recurringLineItemId, monthKey }];
+}
+
+export function resolveRecurringLineItemIdForEntry(
+  entry: CalendarEntry,
+  client: Client
+): string | null {
+  if (entry.recurringLineItemId) return entry.recurringLineItemId;
+
+  const day = dayOfMonth(entry.date);
+  const description = entry.description.trim();
+  const match = client.recurringLineItems.find(
+    (item) =>
+      item.dayOfMonth === day &&
+      item.rate === entry.rate &&
+      item.description.trim() === description
+  );
+
+  return match?.id ?? null;
+}
+
 export function recurringLineItemAppliedForMonth(
   recurringId: string,
   clientId: string,
   monthKey: string,
   invoices: Invoice[],
-  calendarEntries: CalendarEntry[]
+  calendarEntries: CalendarEntry[],
+  exclusions: RecurringCalendarExclusion[] = []
 ): boolean {
+  if (isRecurringExcludedForMonth(recurringId, clientId, monthKey, exclusions)) {
+    return true;
+  }
+
   for (const invoice of invoices) {
     if (invoice.clientId !== clientId) continue;
     if (!invoice.issueDate.startsWith(monthKey)) continue;
@@ -56,7 +119,8 @@ export function missingRecurringLineItems(
   clientId: string,
   issueDate: string,
   invoices: Invoice[],
-  calendarEntries: CalendarEntry[]
+  calendarEntries: CalendarEntry[],
+  exclusions: RecurringCalendarExclusion[] = []
 ): RecurringLineItem[] {
   const monthKey = monthKeyFromDate(issueDate);
 
@@ -68,7 +132,8 @@ export function missingRecurringLineItems(
       clientId,
       monthKey,
       invoices,
-      calendarEntries
+      calendarEntries,
+      exclusions
     );
   });
 }
@@ -78,7 +143,8 @@ export function recurringCalendarEntriesForMonth(
   year: number,
   month: number,
   invoices: Invoice[],
-  calendarEntries: CalendarEntry[]
+  calendarEntries: CalendarEntry[],
+  globalExclusions: RecurringCalendarExclusion[] = []
 ): Omit<CalendarEntry, 'id'>[] {
   const anchor = monthAnchorDate(year, month);
   const entries: Omit<CalendarEntry, 'id'>[] = [];
@@ -89,7 +155,8 @@ export function recurringCalendarEntriesForMonth(
       client.id,
       anchor,
       invoices,
-      calendarEntries
+      calendarEntries,
+      recurringExclusionsForClient(client, globalExclusions)
     );
 
     for (const recurring of missing) {

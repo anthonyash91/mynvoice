@@ -12,6 +12,7 @@ create table if not exists public.clients (
   additional_emails jsonb not null default '[]'::jsonb,
   additional_rates jsonb not null default '[]'::jsonb,
   recurring_line_items jsonb not null default '[]'::jsonb,
+  recurring_calendar_exclusions jsonb not null default '[]'::jsonb,
   address text not null default '',
   created_at timestamptz not null default now()
 );
@@ -32,13 +33,18 @@ create table if not exists public.invoices (
   tax_enabled boolean not null default false,
   tax_rate numeric not null default 0,
   status text not null default 'draft'
-    check (status in ('draft', 'unpaid', 'paid', 'overdue')),
+    check (status in ('draft', 'unpaid', 'paid', 'overdue', 'payment_sent')),
+  public_token uuid unique,
+  owner_confirm_token uuid unique,
+  paid_at date,
   created_at date not null default current_date,
   unique (user_id, client_id, number)
 );
 
 create index if not exists invoices_user_id_idx on public.invoices (user_id);
 create index if not exists invoices_client_id_idx on public.invoices (client_id);
+create index if not exists invoices_public_token_idx on public.invoices (public_token);
+create index if not exists invoices_owner_confirm_token_idx on public.invoices (owner_confirm_token);
 
 -- Calendar work log entries (billable line items per client per day)
 create table if not exists public.calendar_entries (
@@ -72,6 +78,7 @@ create table if not exists public.user_settings (
   default_tax_rate numeric not null default 0,
   default_due_days integer not null default 14,
   logo text,
+  email_templates jsonb not null default '{}'::jsonb,
   next_invoice_number integer not null default 1,
   updated_at timestamptz not null default now()
 );

@@ -1,4 +1,10 @@
 import { clientInvoiceName } from '@/lib/client';
+import {
+  hasStoredEmailTemplates,
+  migrateEmailTemplates,
+  prepareEmailTemplatesForStorage,
+} from '@/lib/emailTemplates';
+import { loadEmailTemplatesFromStorage } from '@/lib/emailTemplateStorage';
 import { supabase } from '@/lib/supabase';
 import type {
   AppData,
@@ -6,10 +12,12 @@ import type {
   CalendarEntryType,
   Client,
   ClientRate,
+  ClientRecurringCalendarExclusion,
   RecurringLineItem,
   Invoice,
   InvoiceDraft,
   LineItem,
+  EmailTemplates,
   Settings,
 } from '@/types';
 
@@ -72,6 +80,7 @@ interface DbClient {
   additional_emails?: string[];
   additional_rates?: ClientRate[];
   recurring_line_items?: RecurringLineItem[];
+  recurring_calendar_exclusions?: ClientRecurringCalendarExclusion[];
   address?: string;
 }
 
@@ -87,7 +96,21 @@ interface DbInvoice {
   tax_enabled: boolean;
   tax_rate: number;
   status: Invoice['status'];
+  public_token?: string | null;
+  owner_confirm_token?: string | null;
+  paid_at?: string | null;
   created_at: string;
+}
+
+const INVOICE_SELECT =
+  'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, paid_at, created_at';
+
+const INVOICE_SELECT_BASE =
+  'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, created_at';
+
+function isMissingPublicTokenColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('public_token') || message.includes('paid_at');
 }
 
 interface DbCalendarEntry {
@@ -115,6 +138,7 @@ interface DbSettings {
   default_due_days: number;
   logo: string | null;
   next_invoice_number: number;
+  email_templates?: EmailTemplates;
 }
 
 function toClient(row: DbClient): Client {
@@ -127,28 +151,36 @@ function toClient(row: DbClient): Client {
     additionalEmails: row.additional_emails ?? [],
     additionalRates: row.additional_rates ?? [],
     recurringLineItems: row.recurring_line_items ?? [],
+    recurringCalendarExclusions: row.recurring_calendar_exclusions ?? [],
     address: row.address ?? '',
   };
 }
 
 function clientSelectColumns(
   config: ClientDbConfig,
-  includeRecurringLineItems: boolean
+  includeRecurringLineItems: boolean,
+  includeRecurringCalendarExclusions = false
 ): string {
-  if (!config.extended || !includeRecurringLineItems) {
+  if (!config.extended) {
     return config.selectColumns;
   }
-  if (config.selectColumns.includes('recurring_line_items')) {
-    return config.selectColumns;
+
+  let columns = config.selectColumns;
+  if (includeRecurringLineItems && !columns.includes('recurring_line_items')) {
+    columns = `${columns}, recurring_line_items`;
   }
-  return `${config.selectColumns}, recurring_line_items`;
+  if (includeRecurringCalendarExclusions && !columns.includes('recurring_calendar_exclusions')) {
+    columns = `${columns}, recurring_calendar_exclusions`;
+  }
+  return columns;
 }
 
 function clientToRow(
   userId: string,
   client: Omit<Client, 'id'>,
   config: ClientDbConfig,
-  includeRecurringLineItems: boolean
+  includeRecurringLineItems: boolean,
+  includeRecurringCalendarExclusions = false
 ) {
   const row: Record<string, unknown> =
     config.schema === 'renamed'
@@ -171,6 +203,9 @@ function clientToRow(
     row.additional_rates = client.additionalRates;
     if (includeRecurringLineItems) {
       row.recurring_line_items = client.recurringLineItems;
+    }
+    if (includeRecurringCalendarExclusions) {
+      row.recurring_calendar_exclusions = client.recurringCalendarExclusions;
     }
     row.address = client.address;
   }
@@ -212,16 +247,51 @@ async function resolveRecurringLineItemsSupport(userId: string): Promise<boolean
   return !error;
 }
 
+function isMissingRecurringCalendarExclusionsColumnError(error: {
+  message?: string;
+} | null): boolean {
+  return Boolean(error?.message?.includes('recurring_calendar_exclusions'));
+}
+
+async function resolveRecurringCalendarExclusionsSupport(userId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('clients')
+    .select('recurring_calendar_exclusions')
+    .eq('user_id', userId)
+    .limit(1);
+
+  return !error;
+}
+
+async function resolveClientExtendedWriteOptions(userId: string): Promise<{
+  includeRecurringLineItems: boolean;
+  includeRecurringCalendarExclusions: boolean;
+}> {
+  const includeRecurringLineItems = await resolveRecurringLineItemsSupport(userId);
+  const includeRecurringCalendarExclusions =
+    includeRecurringLineItems &&
+    (await resolveRecurringCalendarExclusionsSupport(userId));
+
+  return { includeRecurringLineItems, includeRecurringCalendarExclusions };
+}
+
 function isMissingRecurringColumnError(error: { message?: string } | null): boolean {
   return Boolean(error?.message?.includes('recurring_line_items'));
 }
 
 async function fetchClients(userId: string): Promise<Client[]> {
   const config = await resolveClientDbConfig(userId);
-  const includeRecurring = await resolveRecurringLineItemsSupport(userId);
+  const { includeRecurringLineItems, includeRecurringCalendarExclusions } =
+    await resolveClientExtendedWriteOptions(userId);
   const { data, error } = await supabase
     .from('clients')
-    .select(clientSelectColumns(config, includeRecurring))
+    .select(
+      clientSelectColumns(
+        config,
+        includeRecurringLineItems,
+        includeRecurringCalendarExclusions
+      )
+    )
     .eq('user_id', userId);
 
   if (error) throw error;
@@ -255,11 +325,27 @@ function toInvoice(row: DbInvoice): Invoice {
     taxEnabled: row.tax_enabled,
     taxRate: Number(row.tax_rate),
     status: row.status,
+    publicToken: row.public_token ?? null,
+    paidAt: row.paid_at ?? null,
     createdAt: row.created_at,
   };
 }
 
-function toSettings(row: DbSettings): Settings {
+function resolveEmailTemplates(
+  userId: string,
+  rawTemplates?: EmailTemplates | null
+): EmailTemplates {
+  if (hasStoredEmailTemplates(rawTemplates)) {
+    return migrateEmailTemplates(rawTemplates);
+  }
+
+  const localTemplates = loadEmailTemplatesFromStorage(userId);
+  if (localTemplates) return localTemplates;
+
+  return migrateEmailTemplates(rawTemplates);
+}
+
+function toSettings(userId: string, row: DbSettings): Settings {
   return {
     businessName: row.business_name,
     email: row.email,
@@ -269,8 +355,20 @@ function toSettings(row: DbSettings): Settings {
     defaultTaxRate: Number(row.default_tax_rate),
     defaultDueDays: Number(row.default_due_days ?? 14),
     logo: row.logo,
+    emailTemplates: resolveEmailTemplates(userId, row.email_templates),
   };
 }
+
+function isMissingEmailTemplatesColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('email_templates') || message.includes('email templates');
+}
+
+const USER_SETTINGS_SELECT_WITH_TEMPLATES =
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, next_invoice_number, email_templates';
+
+const USER_SETTINGS_SELECT_BASE =
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, next_invoice_number';
 
 function invoiceToRow(
   userId: string,
@@ -311,20 +409,30 @@ function draftToInvoice(
     taxEnabled: draft.taxEnabled,
     taxRate: draft.taxRate,
     status,
+    publicToken: null,
+    paidAt: null,
     createdAt,
   };
 }
 
 async function ensureUserSettings(userId: string): Promise<DbSettings> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('user_settings')
     .upsert({ user_id: userId }, { onConflict: 'user_id' })
-    .select(
-      'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, next_invoice_number'
-    )
+    .select(USER_SETTINGS_SELECT_WITH_TEMPLATES)
     .single();
+
+  if (error && isMissingEmailTemplatesColumnError(error)) {
+    ({ data, error } = await supabase
+      .from('user_settings')
+      .upsert({ user_id: userId }, { onConflict: 'user_id' })
+      .select(USER_SETTINGS_SELECT_BASE)
+      .single());
+  }
+
   if (error) throw error;
-  return data;
+  if (!data) throw new Error('Failed to load user settings');
+  return data as unknown as DbSettings;
 }
 
 export async function fetchAppData(userId: string): Promise<AppData> {
@@ -333,14 +441,16 @@ export async function fetchAppData(userId: string): Promise<AppData> {
   } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated. Please sign in again.');
 
-  const [clients, invoicesRes, calendarRes, settingsRow] = await Promise.all([
+  const invoicesRes = await (async () => {
+    const withToken = await supabase.from('invoices').select(INVOICE_SELECT).eq('user_id', userId);
+    if (withToken.error && isMissingPublicTokenColumnError(withToken.error)) {
+      return supabase.from('invoices').select(INVOICE_SELECT_BASE).eq('user_id', userId);
+    }
+    return withToken;
+  })();
+
+  const [clients, calendarRes, settingsRow] = await Promise.all([
     fetchClients(userId),
-    supabase
-      .from('invoices')
-      .select(
-        'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, created_at'
-      )
-      .eq('user_id', userId),
     supabase
       .from('calendar_entries')
       .select(CALENDAR_ENTRY_SELECT)
@@ -358,27 +468,37 @@ export async function fetchAppData(userId: string): Promise<AppData> {
     calendarEntries: (calendarRes.data ?? []).map((row) =>
       toCalendarEntry(row as DbCalendarEntry)
     ),
-    settings: toSettings(settingsRow),
+    recurringCalendarExclusions: [],
+    settings: toSettings(userId, settingsRow),
     nextInvoiceNumber: settingsRow.next_invoice_number,
   };
 }
 
 export async function upsertSettings(userId: string, settings: Settings): Promise<void> {
-  const { error } = await supabase.from('user_settings').upsert(
-    {
-      user_id: userId,
-      business_name: settings.businessName,
-      email: settings.email,
-      business_address: settings.businessAddress,
-      mailing_address: settings.mailingAddress,
-      payment_details: settings.paymentDetails,
-      default_tax_rate: settings.defaultTaxRate,
-      default_due_days: settings.defaultDueDays,
-      logo: settings.logo,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id' }
-  );
+  const emailTemplates = prepareEmailTemplatesForStorage(settings.emailTemplates);
+  const row: Record<string, unknown> = {
+    user_id: userId,
+    business_name: settings.businessName,
+    email: settings.email,
+    business_address: settings.businessAddress,
+    mailing_address: settings.mailingAddress,
+    payment_details: settings.paymentDetails,
+    default_tax_rate: settings.defaultTaxRate,
+    default_due_days: settings.defaultDueDays,
+    logo: settings.logo,
+    email_templates: emailTemplates,
+    updated_at: new Date().toISOString(),
+  };
+
+  let { error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' });
+
+  if (error && isMissingEmailTemplatesColumnError(error)) {
+    delete row.email_templates;
+    ({ error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' }));
+    if (error) throw error;
+    return;
+  }
+
   if (error) throw error;
 }
 
@@ -387,9 +507,20 @@ export async function insertClient(
   client: Omit<Client, 'id'>
 ): Promise<Client> {
   const config = await resolveClientDbConfig(userId);
-  let includeRecurring = await resolveRecurringLineItemsSupport(userId);
-  let row = clientToRow(userId, client, config, includeRecurring);
-  let selectColumns = clientSelectColumns(config, includeRecurring);
+  let { includeRecurringLineItems, includeRecurringCalendarExclusions } =
+    await resolveClientExtendedWriteOptions(userId);
+  let row = clientToRow(
+    userId,
+    client,
+    config,
+    includeRecurringLineItems,
+    includeRecurringCalendarExclusions
+  );
+  let selectColumns = clientSelectColumns(
+    config,
+    includeRecurringLineItems,
+    includeRecurringCalendarExclusions
+  );
 
   let { data, error } = await supabase
     .from('clients')
@@ -397,10 +528,26 @@ export async function insertClient(
     .select(selectColumns)
     .single();
 
-  if (error && includeRecurring && isMissingRecurringColumnError(error)) {
-    includeRecurring = false;
-    row = clientToRow(userId, client, config, false);
-    selectColumns = clientSelectColumns(config, false);
+  if (
+    error &&
+    includeRecurringCalendarExclusions &&
+    isMissingRecurringCalendarExclusionsColumnError(error)
+  ) {
+    includeRecurringCalendarExclusions = false;
+    row = clientToRow(userId, client, config, includeRecurringLineItems, false);
+    selectColumns = clientSelectColumns(config, includeRecurringLineItems, false);
+    ({ data, error } = await supabase
+      .from('clients')
+      .insert(row)
+      .select(selectColumns)
+      .single());
+  }
+
+  if (error && includeRecurringLineItems && isMissingRecurringColumnError(error)) {
+    includeRecurringLineItems = false;
+    includeRecurringCalendarExclusions = false;
+    row = clientToRow(userId, client, config, false, false);
+    selectColumns = clientSelectColumns(config, false, false);
     ({ data, error } = await supabase
       .from('clients')
       .insert(row)
@@ -415,9 +562,20 @@ export async function insertClient(
 
 export async function updateClientRow(userId: string, client: Client): Promise<Client> {
   const config = await resolveClientDbConfig(userId);
-  let includeRecurring = await resolveRecurringLineItemsSupport(userId);
-  let row = clientToRow(userId, client, config, includeRecurring);
-  let selectColumns = clientSelectColumns(config, includeRecurring);
+  let { includeRecurringLineItems, includeRecurringCalendarExclusions } =
+    await resolveClientExtendedWriteOptions(userId);
+  let row = clientToRow(
+    userId,
+    client,
+    config,
+    includeRecurringLineItems,
+    includeRecurringCalendarExclusions
+  );
+  let selectColumns = clientSelectColumns(
+    config,
+    includeRecurringLineItems,
+    includeRecurringCalendarExclusions
+  );
 
   let { data, error } = await supabase
     .from('clients')
@@ -427,10 +585,28 @@ export async function updateClientRow(userId: string, client: Client): Promise<C
     .select(selectColumns)
     .single();
 
-  if (error && includeRecurring && isMissingRecurringColumnError(error)) {
-    includeRecurring = false;
-    row = clientToRow(userId, client, config, false);
-    selectColumns = clientSelectColumns(config, false);
+  if (
+    error &&
+    includeRecurringCalendarExclusions &&
+    isMissingRecurringCalendarExclusionsColumnError(error)
+  ) {
+    includeRecurringCalendarExclusions = false;
+    row = clientToRow(userId, client, config, includeRecurringLineItems, false);
+    selectColumns = clientSelectColumns(config, includeRecurringLineItems, false);
+    ({ data, error } = await supabase
+      .from('clients')
+      .update(row)
+      .eq('user_id', userId)
+      .eq('id', client.id)
+      .select(selectColumns)
+      .single());
+  }
+
+  if (error && includeRecurringLineItems && isMissingRecurringColumnError(error)) {
+    includeRecurringLineItems = false;
+    includeRecurringCalendarExclusions = false;
+    row = clientToRow(userId, client, config, false, false);
+    selectColumns = clientSelectColumns(config, false, false);
     ({ data, error } = await supabase
       .from('clients')
       .update(row)
@@ -494,6 +670,7 @@ async function resolveInvoiceClientId(
         additionalEmails: [],
         additionalRates: [],
         recurringLineItems: [],
+        recurringCalendarExclusions: [],
         address: '',
       });
       clientId = newClient.id;
@@ -535,28 +712,33 @@ export async function saveInvoice(
   const row = invoiceToRow(userId, invoice);
   const { id: _rowId, ...updateFields } = row;
 
-  const selectCols =
-    'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, created_at';
-
   let data: DbInvoice;
   if (!isNew) {
-    const { data: updated, error } = await supabase
+    let result = await supabase
       .from('invoices')
       .update(updateFields)
       .eq('user_id', userId)
       .eq('id', id)
-      .select(selectCols)
+      .select(INVOICE_SELECT)
       .single();
-    if (error) throw error;
-    data = updated;
+    if (result.error && isMissingPublicTokenColumnError(result.error)) {
+      result = await supabase
+        .from('invoices')
+        .update(updateFields)
+        .eq('user_id', userId)
+        .eq('id', id)
+        .select(INVOICE_SELECT_BASE)
+        .single();
+    }
+    if (result.error) throw result.error;
+    data = result.data;
   } else {
-    const { data: inserted, error } = await supabase
-      .from('invoices')
-      .insert(row)
-      .select(selectCols)
-      .single();
-    if (error) throw error;
-    data = inserted;
+    let result = await supabase.from('invoices').insert(row).select(INVOICE_SELECT).single();
+    if (result.error && isMissingPublicTokenColumnError(result.error)) {
+      result = await supabase.from('invoices').insert(row).select(INVOICE_SELECT_BASE).single();
+    }
+    if (result.error) throw result.error;
+    data = result.data;
   }
 
   const { data: settings, error: settingsError } = await supabase
@@ -578,17 +760,69 @@ export async function updateInvoiceStatusRow(
   invoiceId: string,
   status: Invoice['status']
 ): Promise<Invoice> {
-  const { data, error } = await supabase
+  const updateFields: Record<string, unknown> = { status };
+  if (status === 'paid') {
+    updateFields.paid_at = new Date().toISOString().split('T')[0];
+  }
+
+  let result = await supabase
     .from('invoices')
-    .update({ status })
+    .update(updateFields)
     .eq('user_id', userId)
     .eq('id', invoiceId)
-    .select(
-      'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, created_at'
-    )
+    .select(INVOICE_SELECT)
     .single();
-  if (error) throw error;
-  return toInvoice(data);
+
+  if (result.error && isMissingPublicTokenColumnError(result.error)) {
+    const fallbackFields = { status };
+    result = await supabase
+      .from('invoices')
+      .update(fallbackFields)
+      .eq('user_id', userId)
+      .eq('id', invoiceId)
+      .select(INVOICE_SELECT_BASE)
+      .single();
+  }
+
+  if (result.error) throw result.error;
+  return toInvoice(result.data);
+}
+
+export async function ensureInvoicePublicToken(
+  userId: string,
+  invoiceId: string
+): Promise<Invoice> {
+  let result = await supabase
+    .from('invoices')
+    .select(INVOICE_SELECT)
+    .eq('user_id', userId)
+    .eq('id', invoiceId)
+    .single();
+
+  if (result.error && isMissingPublicTokenColumnError(result.error)) {
+    throw new Error(
+      'Run supabase/migrate-invoice-payment-flow.sql to enable public invoice payment links.'
+    );
+  }
+
+  if (result.error) throw result.error;
+  const current = toInvoice(result.data);
+
+  if (current.publicToken) {
+    return current;
+  }
+
+  const publicToken = crypto.randomUUID();
+  let updateResult = await supabase
+    .from('invoices')
+    .update({ public_token: publicToken })
+    .eq('user_id', userId)
+    .eq('id', invoiceId)
+    .select(INVOICE_SELECT)
+    .single();
+
+  if (updateResult.error) throw updateResult.error;
+  return toInvoice(updateResult.data);
 }
 
 export async function insertCalendarEntry(

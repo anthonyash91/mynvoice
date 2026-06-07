@@ -7,9 +7,25 @@ const PAGE_WIDTH_MM = 210;
 const PAGE_HEIGHT_MM = 297;
 const CAPTURE_WIDTH_PX = Math.round(PAGE_WIDTH_MM * (96 / 25.4));
 
-export async function downloadInvoicePdf(invoiceNumber: string): Promise<void> {
+type JsPdfInstance = {
+  addImage: (
+    imageData: string,
+    format: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ) => void;
+  addPage: () => void;
+  output: (type: 'blob') => Blob;
+  save: (filename: string) => void;
+};
+
+async function captureInvoicePdf(): Promise<JsPdfInstance> {
   const source = document.querySelector<HTMLElement>('.invoice-print');
-  if (!source) return;
+  if (!source) {
+    throw new Error('Invoice preview is not ready. Try again in a moment.');
+  }
 
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import('html2canvas-pro'),
@@ -54,7 +70,7 @@ export async function downloadInvoicePdf(invoiceNumber: string): Promise<void> {
     });
 
     const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdf = new jsPDF('p', 'mm', 'a4') as unknown as JsPdfInstance;
 
     const imgWidthMm = PAGE_WIDTH_MM;
     const imgHeightMm = (captureHeight / CAPTURE_WIDTH_PX) * PAGE_WIDTH_MM;
@@ -72,8 +88,44 @@ export async function downloadInvoicePdf(invoiceNumber: string): Promise<void> {
       heightLeft -= PAGE_HEIGHT_MM;
     }
 
-    pdf.save(`${invoiceNumber}.pdf`);
+    return pdf;
   } finally {
     document.body.removeChild(container);
   }
+}
+
+export async function generateInvoicePdfBlob(): Promise<Blob> {
+  const pdf = await captureInvoicePdf();
+  return pdf.output('blob');
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('Failed to encode PDF attachment.'));
+        return;
+      }
+      const base64 = result.split(',')[1];
+      if (!base64) {
+        reject(new Error('Failed to encode PDF attachment.'));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error('Failed to encode PDF attachment.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function generateInvoicePdfBase64(): Promise<string> {
+  const blob = await generateInvoicePdfBlob();
+  return blobToBase64(blob);
+}
+
+export async function downloadInvoicePdf(invoiceNumber: string): Promise<void> {
+  const pdf = await captureInvoicePdf();
+  pdf.save(`${invoiceNumber}.pdf`);
 }

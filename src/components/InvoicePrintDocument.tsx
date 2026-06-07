@@ -8,6 +8,7 @@ import {
   formatDateLong,
 } from '@/lib/calculations';
 import { formatDurationQuantity, formatInvoiceQuantity } from '@/lib/duration';
+import { splitStreetAndCityLines } from '@/lib/address';
 import { LINE_ITEM_KIND_LABEL, lineItemKindFromLineItem } from '@/lib/lineItem';
 import type { Client, Invoice, LineItem, Settings } from '@/types';
 
@@ -35,29 +36,31 @@ export function InvoicePrintDocument({
   const totals = calculateTotal(invoice.lineItems, invoice.taxEnabled, invoice.taxRate);
   const rateBreakdown = buildRateBreakdown(invoice.lineItems);
   const status = resolveStatus(invoice);
+  const [addressLineOne, addressLineTwo] = splitStreetAndCityLines(settings.businessAddress);
 
   return (
     <article className="invoice-print text-[13px]">
       <header className="invoice-print-header invoice-print-pdf-avoid-break">
         <div className="invoice-print-header-main">
-          <div className="invoice-print-header-left">
-            <div className="invoice-print-strong">{settings.businessName}</div>
-            <div className="invoice-print-muted">{settings.email}</div>
-            {settings.businessAddress && (
-              <div className="invoice-print-muted whitespace-pre-line">
-                {settings.businessAddress}
-              </div>
-            )}
+          <div className="invoice-print-header-column">
+            <div className="invoice-print-header-line invoice-print-strong">
+              {settings.businessName}
+            </div>
+            <div className="invoice-print-header-line invoice-print-muted">{settings.email}</div>
+            <div className="invoice-print-header-line invoice-print-muted">{addressLineOne}</div>
+            <div className="invoice-print-header-line invoice-print-muted whitespace-pre-line">
+              {addressLineTwo}
+            </div>
           </div>
-          <div className="invoice-print-right invoice-print-header-right">
-            <div className="invoice-print-header-total invoice-print-strong invoice-print-num">
+          <div className="invoice-print-header-column invoice-print-header-column-right">
+            <div className="invoice-print-header-line invoice-print-strong invoice-print-header-amount">
               {formatCurrency(totals.total)}
             </div>
-            <div className="invoice-print-header-status">
+            <div className="invoice-print-header-line">
               <StatusLabel status={status} />
             </div>
-            <div className="invoice-print-label">Invoice</div>
-            <div className="invoice-print-mono">{invoice.number}</div>
+            <div className="invoice-print-header-line invoice-print-label">Invoice</div>
+            <div className="invoice-print-header-line invoice-print-mono">{invoice.number}</div>
           </div>
         </div>
       </header>

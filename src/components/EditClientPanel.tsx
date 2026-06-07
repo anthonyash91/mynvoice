@@ -22,6 +22,9 @@ export function EditClientPanel({ client, onClose, onSave, onDelete }: EditClien
     additionalEmails: [...client.additionalEmails],
     additionalRates: client.additionalRates.map((r) => ({ ...r })),
     recurringLineItems: client.recurringLineItems.map((item) => ({ ...item })),
+    recurringCalendarExclusions: client.recurringCalendarExclusions.map((item) => ({
+      ...item,
+    })),
     address: client.address,
   });
   const [saving, setSaving] = useState(false);

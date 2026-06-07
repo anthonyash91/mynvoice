@@ -36,6 +36,7 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
     settings.defaultTaxRate,
     settings.defaultDueDays,
     settings.logo,
+    settings.emailTemplates,
   ]);
 
   const resetLogoInput = () => setLogoInputKey((k) => k + 1);

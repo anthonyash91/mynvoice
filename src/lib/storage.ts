@@ -1,3 +1,4 @@
+import { normalizeEmailTemplates } from '@/lib/emailTemplates';
 import type { AppData } from '../types';
 
 const STORAGE_KEY = 'mynvoice-data';
@@ -23,6 +24,7 @@ function seedData(): AppData {
       additionalEmails: [],
       additionalRates: [],
       recurringLineItems: [],
+      recurringCalendarExclusions: [],
       address: '',
     },
     {
@@ -34,6 +36,7 @@ function seedData(): AppData {
       additionalEmails: [],
       additionalRates: [],
       recurringLineItems: [],
+      recurringCalendarExclusions: [],
       address: '',
     },
     {
@@ -45,6 +48,7 @@ function seedData(): AppData {
       additionalEmails: [],
       additionalRates: [],
       recurringLineItems: [],
+      recurringCalendarExclusions: [],
       address: '',
     },
     {
@@ -56,6 +60,7 @@ function seedData(): AppData {
       additionalEmails: [],
       additionalRates: [],
       recurringLineItems: [],
+      recurringCalendarExclusions: [],
       address: '',
     },
   ];
@@ -63,6 +68,7 @@ function seedData(): AppData {
   return {
     clients,
     calendarEntries: [],
+    recurringCalendarExclusions: [],
     settings: {
       businessName: 'Anthony Mercer',
       email: 'hello@anthonymercer.com',
@@ -72,6 +78,7 @@ function seedData(): AppData {
       defaultTaxRate: 0,
       defaultDueDays: 14,
       logo: null,
+      emailTemplates: normalizeEmailTemplates(),
     },
     nextInvoiceNumber: 5,
     invoices: [
@@ -89,6 +96,8 @@ function seedData(): AppData {
         taxEnabled: false,
         taxRate: 0,
         status: 'paid',
+        publicToken: null,
+        paidAt: daysFromNow(-30),
         createdAt: daysFromNow(-45),
       },
       {
@@ -106,6 +115,8 @@ function seedData(): AppData {
         taxEnabled: false,
         taxRate: 0,
         status: 'unpaid',
+        publicToken: null,
+        paidAt: null,
         createdAt: daysFromNow(-20),
       },
       {
@@ -123,6 +134,8 @@ function seedData(): AppData {
         taxRate: 8.5,
         createdAt: daysFromNow(-10),
         status: 'unpaid',
+        publicToken: null,
+        paidAt: null,
       },
       {
         id: 'inv4',
@@ -138,6 +151,8 @@ function seedData(): AppData {
         taxEnabled: false,
         taxRate: 0,
         status: 'draft',
+        publicToken: null,
+        paidAt: null,
         createdAt: today(),
       },
     ],

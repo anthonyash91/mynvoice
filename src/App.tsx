@@ -9,12 +9,14 @@ import { NewInvoicePanel } from '@/components/NewInvoicePanel';
 import { InvoicesView } from '@/views/InvoicesView';
 import { ClientsView } from '@/views/ClientsView';
 import { SettingsView } from '@/views/SettingsView';
+import { TemplatesView } from '@/views/TemplatesView';
 import { CalendarView } from '@/views/CalendarView';
 import { CalendarDayPanel } from '@/components/CalendarDayPanel';
 import { LoginView } from '@/views/LoginView';
 import { useAuth } from '@/hooks/useAuth';
 import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useStore } from '@/hooks/useStore';
+import { getPublicRoute, PublicInvoiceApp } from '@/views/PublicInvoiceApp';
 import { activeViewFromPanel, type Panel, type View } from '@/types';
 
 const PANEL_ANIMATION_MS = 220;
@@ -57,6 +59,7 @@ function AppShell() {
     deleteClient,
     saveInvoiceDraft,
     updateInvoiceStatus,
+    sendInvoice,
     deleteInvoice,
     getClientInvoiceCount,
     addCalendarEntry,
@@ -110,6 +113,8 @@ function AppShell() {
       setPanel({ kind: 'clients' });
     } else if (next === 'settings') {
       setPanel({ kind: 'settings' });
+    } else if (next === 'templates') {
+      setPanel({ kind: 'templates' });
     }
   }, [setPanel]);
 
@@ -221,13 +226,22 @@ function AppShell() {
                 onClose={() => setPanel(null)}
               />
             )}
+            {panel.kind === 'templates' && (
+              <TemplatesView
+                settings={data.settings}
+                onSave={updateSettings}
+                onClose={() => setPanel(null)}
+              />
+            )}
             {panel.kind === 'invoice' && panelInvoice && (
               <InvoicePanel
                 invoice={panelInvoice}
                 client={invoiceClient}
                 settings={data.settings}
                 onClose={() => setPanel(null)}
-                onMarkSent={() => updateInvoiceStatus(panelInvoice.id, 'unpaid')}
+                onSendInvoice={(pdfBase64, purpose) =>
+                  sendInvoice(panelInvoice.id, pdfBase64, purpose)
+                }
                 onMarkPaid={() => updateInvoiceStatus(panelInvoice.id, 'paid')}
                 onDelete={async () => {
                   await deleteInvoice(panelInvoice.id);
@@ -258,6 +272,7 @@ function AppShell() {
                 clients={data.clients}
                 invoices={data.invoices}
                 calendarEntries={data.calendarEntries}
+                recurringCalendarExclusions={data.recurringCalendarExclusions}
                 settings={data.settings}
                 onClose={() => setPanel(null)}
                 onSave={async (draft, status) => {
@@ -278,7 +293,7 @@ function AppShell() {
   );
 }
 
-export default function App() {
+function AuthenticatedApp() {
   const { user, loading, signIn, signUp, isConfigured } = useAuth();
 
   if (!isConfigured) {
@@ -298,4 +313,13 @@ export default function App() {
   }
 
   return <AppShell />;
+}
+
+export default function App() {
+  const publicRoute = getPublicRoute();
+  if (publicRoute) {
+    return <PublicInvoiceApp route={publicRoute} />;
+  }
+
+  return <AuthenticatedApp />;
 }
