@@ -14,6 +14,8 @@ create table if not exists public.clients (
   recurring_line_items jsonb not null default '[]'::jsonb,
   recurring_calendar_exclusions jsonb not null default '[]'::jsonb,
   address text not null default '',
+  reminder_interval_days integer,
+  late_reminder_interval_days integer,
   created_at timestamptz not null default now()
 );
 
@@ -37,6 +39,14 @@ create table if not exists public.invoices (
   public_token uuid unique,
   owner_confirm_token uuid unique,
   paid_at date,
+  email_send_count integer not null default 0,
+  last_email_sent_at timestamptz,
+  last_email_sent_kind text
+    check (last_email_sent_kind is null or last_email_sent_kind in ('unpaid', 'reminder', 'late', 'payment_received')),
+  reminders_paused boolean not null default false,
+  reminder_snooze_until date,
+  reminder_interval_days_override integer,
+  late_reminder_interval_days_override integer,
   created_at date not null default current_date,
   unique (user_id, client_id, number)
 );
@@ -45,6 +55,24 @@ create index if not exists invoices_user_id_idx on public.invoices (user_id);
 create index if not exists invoices_client_id_idx on public.invoices (client_id);
 create index if not exists invoices_public_token_idx on public.invoices (public_token);
 create index if not exists invoices_owner_confirm_token_idx on public.invoices (owner_confirm_token);
+
+-- Email send history
+create table if not exists public.invoice_email_history (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  invoice_id uuid references public.invoices (id) on delete set null,
+  invoice_number text not null,
+  client_name text not null,
+  email_kind text not null
+    check (email_kind in ('unpaid', 'reminder', 'late', 'payment_received')),
+  sent_at timestamptz not null default now()
+);
+
+create index if not exists invoice_email_history_user_id_idx
+  on public.invoice_email_history (user_id);
+
+create index if not exists invoice_email_history_sent_at_idx
+  on public.invoice_email_history (user_id, sent_at desc);
 
 -- Calendar work log entries (billable line items per client per day)
 create table if not exists public.calendar_entries (
@@ -77,6 +105,11 @@ create table if not exists public.user_settings (
   payment_details text not null default '',
   default_tax_rate numeric not null default 0,
   default_due_days integer not null default 14,
+  reminder_interval_days integer not null default 5,
+  late_reminder_interval_days integer not null default 3,
+  paypal_client_id text not null default '',
+  paypal_client_secret text not null default '',
+  paypal_sandbox boolean not null default true,
   logo text,
   email_templates jsonb not null default '{}'::jsonb,
   next_invoice_number integer not null default 1,
@@ -110,6 +143,7 @@ alter table public.clients enable row level security;
 alter table public.invoices enable row level security;
 alter table public.calendar_entries enable row level security;
 alter table public.user_settings enable row level security;
+alter table public.invoice_email_history enable row level security;
 
 -- Clients policies
 create policy "Users can view own clients"
@@ -165,6 +199,15 @@ create policy "Users can delete own calendar entries"
 on public.calendar_entries for delete
 using (auth.uid () = user_id);
 
+-- Email history policies
+create policy "Users can view own email history"
+on public.invoice_email_history for select
+using (auth.uid () = user_id);
+
+create policy "Users can insert own email history"
+on public.invoice_email_history for insert
+with check (auth.uid () = user_id);
+
 -- Settings policies
 create policy "Users can view own settings"
 on public.user_settings for select
@@ -186,6 +229,7 @@ grant select, insert, update, delete on public.clients to authenticated;
 grant select, insert, update, delete on public.invoices to authenticated;
 grant select, insert, update, delete on public.calendar_entries to authenticated;
 grant select, insert, update, delete on public.user_settings to authenticated;
+grant select, insert on public.invoice_email_history to authenticated;
 
 grant select on public.clients to anon;
 grant select on public.invoices to anon;

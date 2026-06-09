@@ -242,27 +242,30 @@ export function generateInvoicePdfBase64(input: InvoicePdfInput): string {
   const secondary = clientSecondaryName(client);
   if (secondary) writeMuted(secondary, margin);
   if (client?.primaryEmail) writeMuted(client.primaryEmail, margin);
-  if (client?.address) writeMuted(client.address, margin);
+  if (client?.address) {
+    const [clientAddressLineOne, clientAddressLineTwo] = splitStreetAndCityLines(client.address);
+    writeMuted(clientAddressLineOne, margin);
+    writeMuted(clientAddressLineTwo, margin);
+  }
 
   const datesX = pageWidth - margin - 45;
-  let datesY = billedToY;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(110, 110, 115);
-  doc.text('Issued', datesX, datesY);
-  datesY += 5;
+  doc.text('Issued', datesX, billedToY);
   doc.setTextColor(17, 17, 17);
-  doc.text(formatDateLong(invoice.issue_date), datesX, datesY);
+  doc.text(formatDateLong(invoice.issue_date), datesX, billedToY + 5);
+  const issuedBottomY = billedToY + 10;
+
+  const sectionBottomY = Math.max(y, issuedBottomY);
   if (invoice.due_date) {
-    datesY += 8;
     doc.setTextColor(110, 110, 115);
-    doc.text('Due', datesX, datesY);
-    datesY += 5;
+    doc.text('Due', datesX, sectionBottomY - 5);
     doc.setTextColor(17, 17, 17);
-    doc.text(formatDateLong(String(invoice.due_date)), datesX, datesY);
+    doc.text(formatDateLong(String(invoice.due_date)), datesX, sectionBottomY);
   }
 
-  y = Math.max(y, datesY + 10);
+  y = sectionBottomY + 10;
 
   const colDesc = margin;
   const colQty = margin + contentWidth * 0.55;

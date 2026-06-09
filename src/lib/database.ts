@@ -5,6 +5,7 @@ import {
   prepareEmailTemplatesForStorage,
 } from '@/lib/emailTemplates';
 import { loadEmailTemplatesFromStorage } from '@/lib/emailTemplateStorage';
+import { emptyInvoiceReminderSettings, isInvoicePastDue } from '@/lib/invoice';
 import { supabase } from '@/lib/supabase';
 import type {
   AppData,
@@ -16,7 +17,10 @@ import type {
   RecurringLineItem,
   Invoice,
   InvoiceDraft,
+  InvoiceReminderSettings,
   LineItem,
+  EmailHistoryEntry,
+  EmailTemplateKind,
   EmailTemplates,
   Settings,
 } from '@/types';
@@ -30,6 +34,18 @@ interface ClientDbConfig {
 }
 
 const CLIENT_DB_ATTEMPTS: ClientDbConfig[] = [
+  {
+    schema: 'renamed',
+    extended: true,
+    selectColumns:
+      'id, owner, company_name, primary_email, hourly_rate, additional_emails, additional_rates, recurring_line_items, recurring_calendar_exclusions, address, reminder_interval_days, late_reminder_interval_days',
+  },
+  {
+    schema: 'legacy',
+    extended: true,
+    selectColumns:
+      'id, name, company, email, hourly_rate, additional_emails, additional_rates, recurring_line_items, recurring_calendar_exclusions, address, reminder_interval_days, late_reminder_interval_days',
+  },
   {
     schema: 'renamed',
     extended: true,
@@ -82,6 +98,8 @@ interface DbClient {
   recurring_line_items?: RecurringLineItem[];
   recurring_calendar_exclusions?: ClientRecurringCalendarExclusion[];
   address?: string;
+  reminder_interval_days?: number | null;
+  late_reminder_interval_days?: number | null;
 }
 
 interface DbInvoice {
@@ -99,18 +117,148 @@ interface DbInvoice {
   public_token?: string | null;
   owner_confirm_token?: string | null;
   paid_at?: string | null;
+  email_send_count?: number;
+  last_email_sent_at?: string | null;
+  last_email_sent_kind?: EmailTemplateKind | null;
+  reminders_paused?: boolean;
+  reminder_snooze_until?: string | null;
+  reminder_interval_days_override?: number | null;
+  late_reminder_interval_days_override?: number | null;
   created_at: string;
 }
 
 const INVOICE_SELECT =
-  'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, paid_at, created_at';
+  'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, paid_at, email_send_count, last_email_sent_at, last_email_sent_kind, reminders_paused, reminder_snooze_until, reminder_interval_days_override, late_reminder_interval_days_override, created_at';
+
+const INVOICE_SELECT_TOKEN =
+  'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, paid_at, email_send_count, last_email_sent_at, last_email_sent_kind, created_at';
 
 const INVOICE_SELECT_BASE =
   'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, created_at';
 
+interface DbEmailHistory {
+  id: string;
+  invoice_id: string | null;
+  invoice_number: string;
+  client_name: string;
+  email_kind: EmailTemplateKind;
+  sent_at: string;
+}
+
+const EMAIL_HISTORY_SELECT =
+  'id, invoice_id, invoice_number, client_name, email_kind, sent_at';
+
+function isMissingEmailHistoryTableError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return (
+    message.includes('invoice_email_history') ||
+    message.includes('schema cache') ||
+    (message.includes('relation') && message.includes('does not exist'))
+  );
+}
+
+function toEmailHistoryEntry(row: DbEmailHistory): EmailHistoryEntry {
+  return {
+    id: row.id,
+    invoiceId: row.invoice_id,
+    invoiceNumber: row.invoice_number,
+    clientName: row.client_name,
+    emailKind: row.email_kind,
+    sentAt: row.sent_at,
+  };
+}
+
+export async function fetchEmailHistory(userId: string): Promise<EmailHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from('invoice_email_history')
+    .select(EMAIL_HISTORY_SELECT)
+    .eq('user_id', userId)
+    .order('sent_at', { ascending: false });
+
+  if (error) {
+    if (isMissingEmailHistoryTableError(error)) return [];
+    throw error;
+  }
+
+  return (data ?? []).map((row) => toEmailHistoryEntry(row as DbEmailHistory));
+}
+
+export async function insertEmailHistory(
+  userId: string,
+  entry: {
+    invoiceId: string | null;
+    invoiceNumber: string;
+    clientName: string;
+    emailKind: EmailTemplateKind;
+    sentAt: string;
+  }
+): Promise<EmailHistoryEntry | null> {
+  const { data, error } = await supabase
+    .from('invoice_email_history')
+    .insert({
+      user_id: userId,
+      invoice_id: entry.invoiceId,
+      invoice_number: entry.invoiceNumber,
+      client_name: entry.clientName,
+      email_kind: entry.emailKind,
+      sent_at: entry.sentAt,
+    })
+    .select(EMAIL_HISTORY_SELECT)
+    .single();
+
+  if (error) {
+    if (isMissingEmailHistoryTableError(error)) return null;
+    throw error;
+  }
+
+  return toEmailHistoryEntry(data as DbEmailHistory);
+}
+
+function isMissingReminderControlColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return (
+    message.includes('reminders_paused') ||
+    message.includes('reminder_snooze_until') ||
+    message.includes('reminder_interval_days_override') ||
+    message.includes('late_reminder_interval_days_override')
+  );
+}
+
 function isMissingPublicTokenColumnError(error: { message?: string } | null): boolean {
   const message = error?.message?.toLowerCase() ?? '';
-  return message.includes('public_token') || message.includes('paid_at');
+  return (
+    message.includes('public_token') ||
+    message.includes('paid_at') ||
+    message.includes('email_send_count') ||
+    message.includes('last_email_sent_at') ||
+    message.includes('last_email_sent_kind')
+  );
+}
+
+async function selectInvoicesForUser(userId: string, invoiceId?: string) {
+  const run = (columns: string) => {
+    let query = supabase.from('invoices').select(columns).eq('user_id', userId);
+    if (invoiceId) query = query.eq('id', invoiceId);
+    return query;
+  };
+
+  let result = await run(INVOICE_SELECT);
+  if (result.error && isMissingReminderControlColumnError(result.error)) {
+    result = await run(INVOICE_SELECT_TOKEN);
+  }
+  if (result.error && isMissingPublicTokenColumnError(result.error)) {
+    result = await run(INVOICE_SELECT_BASE);
+  }
+
+  return result;
+}
+
+async function refetchInvoice(userId: string, invoiceId: string): Promise<Invoice> {
+  const result = await selectInvoicesForUser(userId, invoiceId);
+  if (result.error) throw result.error;
+  const row = (result.data ?? [])[0];
+  if (!row) throw new Error('Invoice not found');
+  return toInvoice(row as unknown as DbInvoice);
 }
 
 interface DbCalendarEntry {
@@ -136,6 +284,11 @@ interface DbSettings {
   payment_details: string;
   default_tax_rate: number;
   default_due_days: number;
+  reminder_interval_days?: number;
+  late_reminder_interval_days?: number;
+  paypal_client_id?: string;
+  paypal_client_secret?: string;
+  paypal_sandbox?: boolean;
   logo: string | null;
   next_invoice_number: number;
   email_templates?: EmailTemplates;
@@ -153,6 +306,12 @@ function toClient(row: DbClient): Client {
     recurringLineItems: row.recurring_line_items ?? [],
     recurringCalendarExclusions: row.recurring_calendar_exclusions ?? [],
     address: row.address ?? '',
+    reminderIntervalDays:
+      row.reminder_interval_days != null ? Number(row.reminder_interval_days) : null,
+    lateReminderIntervalDays:
+      row.late_reminder_interval_days != null
+        ? Number(row.late_reminder_interval_days)
+        : null,
   };
 }
 
@@ -208,9 +367,25 @@ function clientToRow(
       row.recurring_calendar_exclusions = client.recurringCalendarExclusions;
     }
     row.address = client.address;
+    row.reminder_interval_days = client.reminderIntervalDays;
+    row.late_reminder_interval_days = client.lateReminderIntervalDays;
   }
 
   return row;
+}
+
+function isMissingClientReminderColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return (
+    message.includes('reminder_interval_days') || message.includes('late_reminder_interval_days')
+  );
+}
+
+function clientToRowWithoutReminderColumns(row: Record<string, unknown>) {
+  const next = { ...row };
+  delete next.reminder_interval_days;
+  delete next.late_reminder_interval_days;
+  return next;
 }
 
 function isMissingColumnError(error: { message?: string } | null): boolean {
@@ -327,6 +502,19 @@ function toInvoice(row: DbInvoice): Invoice {
     status: row.status,
     publicToken: row.public_token ?? null,
     paidAt: row.paid_at ?? null,
+    emailSendCount: Number(row.email_send_count ?? 0),
+    lastEmailSentAt: row.last_email_sent_at ?? null,
+    lastEmailSentKind: row.last_email_sent_kind ?? null,
+    remindersPaused: row.reminders_paused ?? false,
+    reminderSnoozeUntil: row.reminder_snooze_until ?? null,
+    reminderIntervalDaysOverride:
+      row.reminder_interval_days_override != null
+        ? Number(row.reminder_interval_days_override)
+        : null,
+    lateReminderIntervalDaysOverride:
+      row.late_reminder_interval_days_override != null
+        ? Number(row.late_reminder_interval_days_override)
+        : null,
     createdAt: row.created_at,
   };
 }
@@ -354,6 +542,11 @@ function toSettings(userId: string, row: DbSettings): Settings {
     paymentDetails: row.payment_details,
     defaultTaxRate: Number(row.default_tax_rate),
     defaultDueDays: Number(row.default_due_days ?? 14),
+    reminderIntervalDays: Number(row.reminder_interval_days ?? 5),
+    lateReminderIntervalDays: Number(row.late_reminder_interval_days ?? 3),
+    paypalClientId: String(row.paypal_client_id ?? ''),
+    paypalClientSecret: String(row.paypal_client_secret ?? ''),
+    paypalSandbox: row.paypal_sandbox ?? true,
     logo: row.logo,
     emailTemplates: resolveEmailTemplates(userId, row.email_templates),
   };
@@ -364,11 +557,36 @@ function isMissingEmailTemplatesColumnError(error: { message?: string } | null):
   return message.includes('email_templates') || message.includes('email templates');
 }
 
+function isMissingReminderIntervalColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('reminder_interval_days');
+}
+
+function isMissingLateReminderIntervalColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('late_reminder_interval_days');
+}
+
+function isMissingPayPalColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return (
+    message.includes('paypal_client_id') ||
+    message.includes('paypal_client_secret') ||
+    message.includes('paypal_sandbox')
+  );
+}
+
 const USER_SETTINGS_SELECT_WITH_TEMPLATES =
-  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, next_invoice_number, email_templates';
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, reminder_interval_days, late_reminder_interval_days, paypal_client_id, paypal_client_secret, paypal_sandbox, logo, next_invoice_number, email_templates';
+
+const USER_SETTINGS_SELECT_NO_PAYPAL =
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, reminder_interval_days, late_reminder_interval_days, logo, next_invoice_number, email_templates';
 
 const USER_SETTINGS_SELECT_BASE =
-  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, next_invoice_number';
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, reminder_interval_days, late_reminder_interval_days, paypal_client_id, paypal_client_secret, paypal_sandbox, logo, next_invoice_number';
+
+const USER_SETTINGS_SELECT_BASE_NO_PAYPAL =
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, reminder_interval_days, late_reminder_interval_days, logo, next_invoice_number';
 
 function invoiceToRow(
   userId: string,
@@ -411,22 +629,44 @@ function draftToInvoice(
     status,
     publicToken: null,
     paidAt: null,
+    emailSendCount: 0,
+    lastEmailSentAt: null,
+    lastEmailSentKind: null,
+    ...emptyInvoiceReminderSettings(),
     createdAt,
   };
 }
 
 async function ensureUserSettings(userId: string): Promise<DbSettings> {
+  const upsert = { user_id: userId };
+
   let { data, error } = await supabase
     .from('user_settings')
-    .upsert({ user_id: userId }, { onConflict: 'user_id' })
+    .upsert(upsert, { onConflict: 'user_id' })
     .select(USER_SETTINGS_SELECT_WITH_TEMPLATES)
     .single();
+
+  if (error && isMissingPayPalColumnError(error)) {
+    ({ data, error } = await supabase
+      .from('user_settings')
+      .upsert(upsert, { onConflict: 'user_id' })
+      .select(USER_SETTINGS_SELECT_NO_PAYPAL)
+      .single());
+  }
 
   if (error && isMissingEmailTemplatesColumnError(error)) {
     ({ data, error } = await supabase
       .from('user_settings')
-      .upsert({ user_id: userId }, { onConflict: 'user_id' })
+      .upsert(upsert, { onConflict: 'user_id' })
       .select(USER_SETTINGS_SELECT_BASE)
+      .single());
+  }
+
+  if (error && isMissingPayPalColumnError(error)) {
+    ({ data, error } = await supabase
+      .from('user_settings')
+      .upsert(upsert, { onConflict: 'user_id' })
+      .select(USER_SETTINGS_SELECT_BASE_NO_PAYPAL)
       .single());
   }
 
@@ -435,21 +675,41 @@ async function ensureUserSettings(userId: string): Promise<DbSettings> {
   return data as unknown as DbSettings;
 }
 
+export async function syncOverdueInvoiceStatuses(userId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('id, due_date')
+    .eq('user_id', userId)
+    .eq('status', 'unpaid');
+
+  if (error) throw error;
+
+  const overdueIds = (data ?? [])
+    .filter((row) => isInvoicePastDue({ dueDate: row.due_date as string | null }))
+    .map((row) => row.id as string);
+
+  if (overdueIds.length === 0) return;
+
+  const { error: updateError } = await supabase
+    .from('invoices')
+    .update({ status: 'overdue' })
+    .eq('user_id', userId)
+    .in('id', overdueIds);
+
+  if (updateError) throw updateError;
+}
+
 export async function fetchAppData(userId: string): Promise<AppData> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
   if (!session) throw new Error('Not authenticated. Please sign in again.');
 
-  const invoicesRes = await (async () => {
-    const withToken = await supabase.from('invoices').select(INVOICE_SELECT).eq('user_id', userId);
-    if (withToken.error && isMissingPublicTokenColumnError(withToken.error)) {
-      return supabase.from('invoices').select(INVOICE_SELECT_BASE).eq('user_id', userId);
-    }
-    return withToken;
-  })();
+  await syncOverdueInvoiceStatuses(userId);
 
-  const [clients, calendarRes, settingsRow] = await Promise.all([
+  const invoicesRes = await selectInvoicesForUser(userId);
+
+  const [clients, calendarRes, settingsRow, emailHistory] = await Promise.all([
     fetchClients(userId),
     supabase
       .from('calendar_entries')
@@ -457,6 +717,7 @@ export async function fetchAppData(userId: string): Promise<AppData> {
       .eq('user_id', userId)
       .order('entry_date', { ascending: true }),
     ensureUserSettings(userId),
+    fetchEmailHistory(userId),
   ]);
 
   if (invoicesRes.error) throw invoicesRes.error;
@@ -464,11 +725,12 @@ export async function fetchAppData(userId: string): Promise<AppData> {
 
   return {
     clients,
-    invoices: (invoicesRes.data ?? []).map(toInvoice),
+    invoices: ((invoicesRes.data ?? []) as unknown as DbInvoice[]).map(toInvoice),
     calendarEntries: (calendarRes.data ?? []).map((row) =>
       toCalendarEntry(row as DbCalendarEntry)
     ),
     recurringCalendarExclusions: [],
+    emailHistory,
     settings: toSettings(userId, settingsRow),
     nextInvoiceNumber: settingsRow.next_invoice_number,
   };
@@ -485,6 +747,11 @@ export async function upsertSettings(userId: string, settings: Settings): Promis
     payment_details: settings.paymentDetails,
     default_tax_rate: settings.defaultTaxRate,
     default_due_days: settings.defaultDueDays,
+    reminder_interval_days: settings.reminderIntervalDays,
+    late_reminder_interval_days: settings.lateReminderIntervalDays,
+    paypal_client_id: settings.paypalClientId,
+    paypal_client_secret: settings.paypalClientSecret,
+    paypal_sandbox: settings.paypalSandbox,
     logo: settings.logo,
     email_templates: emailTemplates,
     updated_at: new Date().toISOString(),
@@ -495,8 +762,23 @@ export async function upsertSettings(userId: string, settings: Settings): Promis
   if (error && isMissingEmailTemplatesColumnError(error)) {
     delete row.email_templates;
     ({ error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' }));
-    if (error) throw error;
-    return;
+  }
+
+  if (error && isMissingReminderIntervalColumnError(error)) {
+    delete row.reminder_interval_days;
+    ({ error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' }));
+  }
+
+  if (error && isMissingLateReminderIntervalColumnError(error)) {
+    delete row.late_reminder_interval_days;
+    ({ error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' }));
+  }
+
+  if (error && isMissingPayPalColumnError(error)) {
+    delete row.paypal_client_id;
+    delete row.paypal_client_secret;
+    delete row.paypal_sandbox;
+    ({ error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' }));
   }
 
   if (error) throw error;
@@ -548,6 +830,15 @@ export async function insertClient(
     includeRecurringCalendarExclusions = false;
     row = clientToRow(userId, client, config, false, false);
     selectColumns = clientSelectColumns(config, false, false);
+    ({ data, error } = await supabase
+      .from('clients')
+      .insert(row)
+      .select(selectColumns)
+      .single());
+  }
+
+  if (error && isMissingClientReminderColumnError(error)) {
+    row = clientToRowWithoutReminderColumns(row);
     ({ data, error } = await supabase
       .from('clients')
       .insert(row)
@@ -616,6 +907,17 @@ export async function updateClientRow(userId: string, client: Client): Promise<C
       .single());
   }
 
+  if (error && isMissingClientReminderColumnError(error)) {
+    row = clientToRowWithoutReminderColumns(row);
+    ({ data, error } = await supabase
+      .from('clients')
+      .update(row)
+      .eq('user_id', userId)
+      .eq('id', client.id)
+      .select(selectColumns)
+      .single());
+  }
+
   if (error) throw error;
   if (!data) throw new Error('Failed to update client');
 
@@ -672,6 +974,8 @@ async function resolveInvoiceClientId(
         recurringLineItems: [],
         recurringCalendarExclusions: [],
         address: '',
+        reminderIntervalDays: null,
+        lateReminderIntervalDays: null,
       });
       clientId = newClient.id;
     }
@@ -755,6 +1059,36 @@ export async function saveInvoice(
   };
 }
 
+export async function updateInvoiceReminderSettingsRow(
+  userId: string,
+  invoiceId: string,
+  settings: InvoiceReminderSettings
+): Promise<Invoice> {
+  const updateFields = {
+    reminders_paused: settings.remindersPaused,
+    reminder_snooze_until: settings.reminderSnoozeUntil,
+    reminder_interval_days_override: settings.reminderIntervalDaysOverride,
+    late_reminder_interval_days_override: settings.lateReminderIntervalDaysOverride,
+  };
+
+  const { error: updateError } = await supabase
+    .from('invoices')
+    .update(updateFields)
+    .eq('user_id', userId)
+    .eq('id', invoiceId);
+
+  if (updateError) {
+    if (isMissingReminderControlColumnError(updateError)) {
+      throw new Error(
+        'Run supabase/migrate-invoice-reminder-controls.sql to enable per-invoice reminder controls.'
+      );
+    }
+    throw updateError;
+  }
+
+  return refetchInvoice(userId, invoiceId);
+}
+
 export async function updateInvoiceStatusRow(
   userId: string,
   invoiceId: string,
@@ -763,6 +1097,8 @@ export async function updateInvoiceStatusRow(
   const updateFields: Record<string, unknown> = { status };
   if (status === 'paid') {
     updateFields.paid_at = new Date().toISOString().split('T')[0];
+  } else {
+    updateFields.paid_at = null;
   }
 
   let result = await supabase
@@ -785,6 +1121,60 @@ export async function updateInvoiceStatusRow(
   }
 
   if (result.error) throw result.error;
+  return toInvoice(result.data);
+}
+
+export async function recordInvoiceEmailSent(
+  userId: string,
+  invoiceId: string,
+  kind: EmailTemplateKind
+): Promise<Invoice> {
+  const { data: current, error: fetchError } = await supabase
+    .from('invoices')
+    .select('email_send_count')
+    .eq('user_id', userId)
+    .eq('id', invoiceId)
+    .single();
+
+  if (fetchError && isMissingPublicTokenColumnError(fetchError)) {
+    const fallback = await supabase
+      .from('invoices')
+      .select(INVOICE_SELECT_BASE)
+      .eq('user_id', userId)
+      .eq('id', invoiceId)
+      .single();
+    if (fallback.error) throw fallback.error;
+    return toInvoice(fallback.data);
+  }
+
+  if (fetchError) throw fetchError;
+
+  const nextCount = Number(current?.email_send_count ?? 0) + 1;
+  const sentAt = new Date().toISOString();
+
+  let result = await supabase
+    .from('invoices')
+    .update({
+      email_send_count: nextCount,
+      last_email_sent_at: sentAt,
+      last_email_sent_kind: kind,
+    })
+    .eq('user_id', userId)
+    .eq('id', invoiceId)
+    .select(INVOICE_SELECT)
+    .single();
+
+  if (result.error && isMissingPublicTokenColumnError(result.error)) {
+    result = await supabase
+      .from('invoices')
+      .select(INVOICE_SELECT_BASE)
+      .eq('user_id', userId)
+      .eq('id', invoiceId)
+      .single();
+  }
+
+  if (result.error) throw result.error;
+
   return toInvoice(result.data);
 }
 
@@ -898,6 +1288,25 @@ export async function unbillCalendarEntriesForInvoice(
     .update({ invoice_id: null })
     .eq('user_id', userId)
     .eq('invoice_id', invoiceId)
+    .select(CALENDAR_ENTRY_SELECT);
+
+  if (error) throw error;
+  return (data ?? []).map((row) => toCalendarEntry(row as DbCalendarEntry));
+}
+
+export async function unbillCalendarEntryIds(
+  userId: string,
+  invoiceId: string,
+  entryIds: string[]
+): Promise<CalendarEntry[]> {
+  if (entryIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('calendar_entries')
+    .update({ invoice_id: null })
+    .eq('user_id', userId)
+    .eq('invoice_id', invoiceId)
+    .in('id', entryIds)
     .select(CALENDAR_ENTRY_SELECT);
 
   if (error) throw error;

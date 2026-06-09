@@ -3,3 +3,6 @@ verify_jwt = true
 
 [functions.invoice-public]
 verify_jwt = false
+
+[functions.send-invoice-reminders]
+verify_jwt = false

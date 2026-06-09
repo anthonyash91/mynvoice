@@ -35,6 +35,11 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
     settings.paymentDetails,
     settings.defaultTaxRate,
     settings.defaultDueDays,
+    settings.reminderIntervalDays,
+    settings.lateReminderIntervalDays,
+    settings.paypalClientId,
+    settings.paypalClientSecret,
+    settings.paypalSandbox,
     settings.logo,
     settings.emailTemplates,
   ]);
@@ -127,6 +132,38 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           />
         </Field>
 
+        <Field label="PayPal Client ID">
+          <TextInput
+            value={draft.paypalClientId}
+            onChange={(v) => setDraft({ ...draft, paypalClientId: v })}
+            placeholder="From PayPal Developer Dashboard"
+          />
+        </Field>
+
+        <Field label="PayPal Client Secret">
+          <TextInput
+            type="password"
+            value={draft.paypalClientSecret}
+            onChange={(v) => setDraft({ ...draft, paypalClientSecret: v })}
+            placeholder="Stored securely; used server-side only"
+          />
+        </Field>
+
+        <Field label="PayPal sandbox mode">
+          <label className="flex items-center gap-2 text-[13px] text-foreground">
+            <input
+              type="checkbox"
+              checked={draft.paypalSandbox}
+              onChange={(e) => setDraft({ ...draft, paypalSandbox: e.target.checked })}
+              className="h-4 w-4 rounded border-border"
+            />
+            Use PayPal sandbox for testing
+          </label>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            When enabled, clients pay with sandbox accounts. Turn off for live payments.
+          </p>
+        </Field>
+
         <Field label="Default tax rate (%)">
           <TextInput
             type="number"
@@ -145,6 +182,40 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           />
           <p className="mt-1 text-[12px] text-muted-foreground">
             Days after the issue date on new invoices.
+          </p>
+        </Field>
+
+        <Field label="Payment reminder interval (days)">
+          <TextInput
+            type="number"
+            value={String(draft.reminderIntervalDays)}
+            onChange={(v) =>
+              setDraft({
+                ...draft,
+                reminderIntervalDays: v === '' ? 1 : Math.max(1, Number(v)),
+              })
+            }
+            placeholder="5"
+          />
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            Unpaid invoices receive an automatic reminder email this many days after the last send.
+          </p>
+        </Field>
+
+        <Field label="Late notice interval (days)">
+          <TextInput
+            type="number"
+            value={String(draft.lateReminderIntervalDays)}
+            onChange={(v) =>
+              setDraft({
+                ...draft,
+                lateReminderIntervalDays: v === '' ? 1 : Math.max(1, Number(v)),
+              })
+            }
+            placeholder="3"
+          />
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            Overdue invoices receive an automatic late notice this many days after the last send.
           </p>
         </Field>
 

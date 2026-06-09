@@ -1,5 +1,11 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { buildInvoiceEmailContext } from '../_shared/edgeEmail.ts';
 import { generateInvoicePdfBase64 } from '../_shared/invoicePdf.ts';
+import {
+  capturePayPalOrder,
+  createPayPalOrder,
+  formatPayPalAmount,
+} from '../_shared/paypal.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,7 +13,10 @@ const corsHeaders = {
 };
 
 const USER_SETTINGS_PUBLIC_SELECT =
-  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo';
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, paypal_client_id, paypal_client_secret, paypal_sandbox';
+
+const INVOICE_PUBLIC_SELECT =
+  'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, owner_confirm_token, created_at';
 
 type EmailTemplate = {
   subject: string;
@@ -183,36 +192,16 @@ function buildContext(
   publicToken: string,
   ownerConfirmToken = ''
 ): Record<string, string> {
-  const lineItems = (invoice.line_items as Array<{ quantity: number; rate: number }>) ?? [];
-  const total = calculateTotal(
-    lineItems,
-    Boolean(invoice.tax_enabled),
-    Number(invoice.tax_rate ?? 0)
-  );
-  const dueDate = invoice.due_date ? formatDateLong(String(invoice.due_date)) : '—';
-  const dueDateLine = invoice.due_date
-    ? `Payment is due ${formatDateLong(String(invoice.due_date))}.`
-    : '';
-
   const origin = appOrigin();
-  const invoiceLink = origin ? `${origin}/i/${publicToken}` : '';
-  const paymentSentLink = origin ? `${origin}/i/${publicToken}/payment-sent` : '';
-  const confirmPaymentLink = ownerConfirmToken && origin
-    ? `${origin}/confirm-payment/${ownerConfirmToken}`
-    : '';
+  const confirmPaymentLink =
+    ownerConfirmToken && origin ? `${origin}/confirm-payment/${ownerConfirmToken}` : '';
   const paidAt = invoice.paid_at ? String(invoice.paid_at) : '';
   const paymentDate = paidAt ? formatDateLong(paidAt) : '—';
 
   return {
-    clientName,
-    invoiceNumber: String(invoice.number),
-    issueDate: formatDateLong(String(invoice.issue_date)),
-    dueDate,
-    dueDateLine,
-    total: formatCurrency(total),
-    businessName: String(settings.business_name || settings.email || '').trim(),
-    invoiceLink,
-    paymentSentLink,
+    ...buildInvoiceEmailContext(invoice, settings, clientName, publicToken, {
+      forOutgoingEmail: true,
+    }),
     confirmPaymentLink,
     paymentDate,
   };
@@ -292,6 +281,38 @@ async function fetchClientForInvoice(
   return null;
 }
 
+function publicPayPalConfig(settings: Record<string, unknown>) {
+  const clientId = String(settings.paypal_client_id ?? '').trim();
+  const clientSecret = String(settings.paypal_client_secret ?? '').trim();
+
+  return {
+    enabled: Boolean(clientId && clientSecret),
+    clientId,
+    sandbox: settings.paypal_sandbox !== false,
+  };
+}
+
+function invoiceTotal(invoice: Record<string, unknown>): number {
+  const lineItems = (invoice.line_items as Array<{ quantity: number; rate: number }>) ?? [];
+  return calculateTotal(
+    lineItems,
+    Boolean(invoice.tax_enabled),
+    Number(invoice.tax_rate ?? 0)
+  );
+}
+
+function paypalCredentials(settings: Record<string, unknown>) {
+  const clientId = String(settings.paypal_client_id ?? '').trim();
+  const clientSecret = String(settings.paypal_client_secret ?? '').trim();
+  const sandbox = settings.paypal_sandbox !== false;
+
+  if (!clientId || !clientSecret) {
+    throw new Error('PayPal is not configured for this business.');
+  }
+
+  return { clientId, clientSecret, sandbox };
+}
+
 function toPublicPayload(
   invoice: Record<string, unknown>,
   settings: Record<string, unknown>,
@@ -322,9 +343,105 @@ function toPublicPayload(
       defaultTaxRate: Number(settings.default_tax_rate ?? 0),
       defaultDueDays: Number(settings.default_due_days ?? 14),
       logo: (settings.logo as string | null) ?? null,
+      paypal: publicPayPalConfig(settings),
     },
     client: normalizePublicClient(client, invoiceClientName),
   };
+}
+
+async function markInvoicePaidAndNotifyClient(input: {
+  supabase: ReturnType<typeof createClient>;
+  resendApiKey: string;
+  invoice: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  clientRow: Record<string, unknown> | null;
+}): Promise<void> {
+  const paidAt = new Date().toISOString().split('T')[0];
+  const { error: updateError } = await input.supabase
+    .from('invoices')
+    .update({ status: 'paid', paid_at: paidAt })
+    .eq('id', input.invoice.id);
+
+  if (updateError) throw updateError;
+  input.invoice.status = 'paid';
+  input.invoice.paid_at = paidAt;
+
+  const recipients = clientRecipients(input.clientRow);
+  if (recipients.length === 0) return;
+
+  const templates = (input.settings.email_templates as EmailTemplates | null) ?? {};
+  const template = templates.payment_received ?? defaultPaymentReceivedTemplate();
+  const displayName = clientDisplayName(input.clientRow, String(input.invoice.client_name));
+  const context = buildContext(
+    input.invoice,
+    input.settings,
+    displayName,
+    String(input.invoice.public_token ?? '')
+  );
+  const rendered = renderTemplate(template, context);
+  const ownerEmail = String(input.settings.email ?? '').trim();
+  const fromName = String(input.settings.business_name ?? '').trim();
+  const from = fromName && ownerEmail ? `${fromName} <${ownerEmail}>` : ownerEmail;
+
+  if (!from || !isValidEmail(ownerEmail)) return;
+
+  const publicClient = normalizePublicClient(input.clientRow, String(input.invoice.client_name));
+  const pdfBase64 = generateInvoicePdfBase64({
+    invoice: {
+      number: String(input.invoice.number),
+      issue_date: String(input.invoice.issue_date),
+      due_date: input.invoice.due_date as string | null | undefined,
+      line_items: (input.invoice.line_items as Array<Record<string, unknown>>) ?? [],
+      notes: input.invoice.notes as string | null | undefined,
+      tax_enabled: Boolean(input.invoice.tax_enabled),
+      tax_rate: Number(input.invoice.tax_rate ?? 0),
+      status: 'paid',
+      client_name: String(input.invoice.client_name),
+    },
+    settings: {
+      business_name: input.settings.business_name as string | null | undefined,
+      email: input.settings.email as string | null | undefined,
+      business_address: input.settings.business_address as string | null | undefined,
+      payment_details: input.settings.payment_details as string | null | undefined,
+    },
+    client: publicClient,
+    clientDisplayName: displayName,
+  });
+
+  await sendResendEmail({
+    apiKey: input.resendApiKey,
+    from,
+    to: recipients,
+    subject: rendered.subject,
+    html: rendered.html,
+    pdfBase64,
+    filename: `${String(input.invoice.number)}.pdf`,
+  });
+
+  const sentAt = new Date().toISOString();
+  const { data: currentSend } = await input.supabase
+    .from('invoices')
+    .select('email_send_count')
+    .eq('id', input.invoice.id)
+    .single();
+
+  await input.supabase
+    .from('invoices')
+    .update({
+      email_send_count: Number(currentSend?.email_send_count ?? 0) + 1,
+      last_email_sent_at: sentAt,
+      last_email_sent_kind: 'payment_received',
+    })
+    .eq('id', input.invoice.id);
+
+  await input.supabase.from('invoice_email_history').insert({
+    user_id: input.invoice.user_id,
+    invoice_id: input.invoice.id,
+    invoice_number: String(input.invoice.number),
+    client_name: String(input.invoice.client_name),
+    email_kind: 'payment_received',
+    sent_at: sentAt,
+  });
 }
 
 Deno.serve(async (req) => {
@@ -354,9 +471,14 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const body = (await req.json()) as { action?: string; token?: string };
+    const body = (await req.json()) as {
+      action?: string;
+      token?: string;
+      orderId?: string;
+    };
     const action = body.action?.trim();
     const token = body.token?.trim();
+    const orderId = body.orderId?.trim();
 
     if (!action || !token) {
       return jsonResponse({ error: 'Action and token are required.' }, 400);
@@ -493,20 +615,10 @@ Deno.serve(async (req) => {
         });
       }
 
-      const paidAt = new Date().toISOString().split('T')[0];
-      const { error: updateError } = await supabase
-        .from('invoices')
-        .update({ status: 'paid', paid_at: paidAt })
-        .eq('id', invoice.id);
-
-      if (updateError) throw updateError;
-      invoice.status = 'paid';
-      invoice.paid_at = paidAt;
-
       const [{ data: settings, error: settingsError }, clientRow] = await Promise.all([
         supabase
           .from('user_settings')
-          .select(`${USER_SETTINGS_PUBLIC_SELECT}, email_templates`)
+          .select(`${USER_SETTINGS_PUBLIC_SELECT}, email_templates, reminder_interval_days`)
           .eq('user_id', invoice.user_id)
           .single(),
         fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
@@ -514,62 +626,148 @@ Deno.serve(async (req) => {
 
       if (settingsError) throw settingsError;
 
-      const recipients = clientRecipients(clientRow);
-      if (recipients.length > 0) {
-        const templates = (settings.email_templates as EmailTemplates | null) ?? {};
-        const template = templates.payment_received ?? defaultPaymentReceivedTemplate();
-        const displayName = clientDisplayName(clientRow, String(invoice.client_name));
-        const context = buildContext(
-          invoice,
-          settings,
-          displayName,
-          String(invoice.public_token ?? '')
-        );
-        const rendered = renderTemplate(template, context);
-        const ownerEmail = String(settings.email ?? '').trim();
-        const fromName = String(settings.business_name ?? '').trim();
-        const from = fromName && ownerEmail ? `${fromName} <${ownerEmail}>` : ownerEmail;
-
-        if (from && isValidEmail(ownerEmail)) {
-          const publicClient = normalizePublicClient(clientRow, String(invoice.client_name));
-          const pdfBase64 = generateInvoicePdfBase64({
-            invoice: {
-              number: String(invoice.number),
-              issue_date: String(invoice.issue_date),
-              due_date: invoice.due_date as string | null | undefined,
-              line_items: (invoice.line_items as Array<Record<string, unknown>>) ?? [],
-              notes: invoice.notes as string | null | undefined,
-              tax_enabled: Boolean(invoice.tax_enabled),
-              tax_rate: Number(invoice.tax_rate ?? 0),
-              status: 'paid',
-              client_name: String(invoice.client_name),
-            },
-            settings: {
-              business_name: settings.business_name as string | null | undefined,
-              email: settings.email as string | null | undefined,
-              business_address: settings.business_address as string | null | undefined,
-              payment_details: settings.payment_details as string | null | undefined,
-            },
-            client: publicClient,
-            clientDisplayName: displayName,
-          });
-
-          await sendResendEmail({
-            apiKey: resendApiKey,
-            from,
-            to: recipients,
-            subject: rendered.subject,
-            html: rendered.html,
-            pdfBase64,
-            filename: `${String(invoice.number)}.pdf`,
-          });
-        }
-      }
+      await markInvoicePaidAndNotifyClient({
+        supabase,
+        resendApiKey,
+        invoice,
+        settings,
+        clientRow,
+      });
 
       return jsonResponse({
         ok: true,
         invoiceNumber: invoice.number,
         clientName: clientDisplayName(clientRow, String(invoice.client_name)),
+      });
+    }
+
+    if (action === 'create_paypal_order') {
+      const { data: invoice, error } = await supabase
+        .from('invoices')
+        .select(INVOICE_PUBLIC_SELECT)
+        .eq('public_token', token)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!invoice) return jsonResponse({ error: 'Invoice not found.' }, 404);
+
+      if (invoice.status === 'paid') {
+        return jsonResponse({ error: 'This invoice is already paid.' }, 400);
+      }
+
+      if (invoice.status === 'payment_sent') {
+        return jsonResponse({ error: 'This invoice is awaiting payment confirmation.' }, 400);
+      }
+
+      const { data: settings, error: settingsError } = await supabase
+        .from('user_settings')
+        .select(USER_SETTINGS_PUBLIC_SELECT)
+        .eq('user_id', invoice.user_id)
+        .single();
+
+      if (settingsError) throw settingsError;
+
+      const credentials = paypalCredentials(settings);
+      const total = invoiceTotal(invoice);
+      if (total <= 0) {
+        return jsonResponse({ error: 'Invoice total must be greater than zero.' }, 400);
+      }
+
+      const createdOrderId = await createPayPalOrder({
+        ...credentials,
+        invoiceId: String(invoice.id),
+        invoiceNumber: String(invoice.number),
+        amount: total,
+      });
+
+      return jsonResponse({ ok: true, orderId: createdOrderId });
+    }
+
+    if (action === 'capture_paypal_payment') {
+      if (!orderId) {
+        return jsonResponse({ error: 'PayPal order id is required.' }, 400);
+      }
+
+      if (!resendApiKey) {
+        return jsonResponse({ error: 'RESEND_API_KEY is not configured.' }, 500);
+      }
+
+      const { data: invoice, error } = await supabase
+        .from('invoices')
+        .select(INVOICE_PUBLIC_SELECT)
+        .eq('public_token', token)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!invoice) return jsonResponse({ error: 'Invoice not found.' }, 404);
+
+      if (invoice.status === 'paid') {
+        const { data: settings, error: settingsError } = await supabase
+          .from('user_settings')
+          .select(USER_SETTINGS_PUBLIC_SELECT)
+          .eq('user_id', invoice.user_id)
+          .single();
+
+        if (settingsError) throw settingsError;
+
+        const clientRow = await fetchClientForInvoice(
+          supabase,
+          String(invoice.user_id),
+          invoice.client_id as string | null
+        );
+
+        return jsonResponse({
+          ok: true,
+          alreadyPaid: true,
+          ...toPublicPayload(invoice, settings, clientRow),
+        });
+      }
+
+      if (invoice.status === 'payment_sent') {
+        return jsonResponse({ error: 'This invoice is awaiting payment confirmation.' }, 400);
+      }
+
+      const [{ data: settings, error: settingsError }, clientRow] = await Promise.all([
+        supabase
+          .from('user_settings')
+          .select(`${USER_SETTINGS_PUBLIC_SELECT}, email_templates, reminder_interval_days`)
+          .eq('user_id', invoice.user_id)
+          .single(),
+        fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
+      ]);
+
+      if (settingsError) throw settingsError;
+
+      const credentials = paypalCredentials(settings);
+      const expectedTotal = invoiceTotal(invoice);
+      const capture = await capturePayPalOrder({
+        ...credentials,
+        orderId,
+      });
+
+      if (capture.status !== 'COMPLETED') {
+        return jsonResponse({ error: 'PayPal payment was not completed.' }, 400);
+      }
+
+      if (capture.referenceId && capture.referenceId !== String(invoice.id)) {
+        return jsonResponse({ error: 'PayPal order does not match this invoice.' }, 400);
+      }
+
+      if (formatPayPalAmount(expectedTotal) !== formatPayPalAmount(capture.amount)) {
+        return jsonResponse({ error: 'PayPal payment amount does not match the invoice total.' }, 400);
+      }
+
+      await markInvoicePaidAndNotifyClient({
+        supabase,
+        resendApiKey,
+        invoice,
+        settings,
+        clientRow,
+      });
+
+      return jsonResponse({
+        ok: true,
+        ...toPublicPayload(invoice, settings, clientRow),
       });
     }
 

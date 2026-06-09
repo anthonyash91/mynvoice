@@ -23,8 +23,14 @@ export function useAuth() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      // Keep the current session during transient refresh events so the app
+      // does not flash the login screen when returning to the tab.
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
+      } else if (nextSession) {
+        setSession(nextSession);
+      }
       setLoading(false);
     });
 

@@ -1,5 +1,11 @@
 import { normalizeEmailTemplates } from '@/lib/emailTemplates';
+import { emptyInvoiceReminderSettings } from '@/lib/invoice';
 import type { AppData } from '../types';
+
+const DEFAULT_CLIENT_REMINDER_FIELDS = {
+  reminderIntervalDays: null,
+  lateReminderIntervalDays: null,
+} as const;
 
 const STORAGE_KEY = 'mynvoice-data';
 
@@ -26,6 +32,7 @@ function seedData(): AppData {
       recurringLineItems: [],
       recurringCalendarExclusions: [],
       address: '',
+      ...DEFAULT_CLIENT_REMINDER_FIELDS,
     },
     {
       id: 'c2',
@@ -38,6 +45,7 @@ function seedData(): AppData {
       recurringLineItems: [],
       recurringCalendarExclusions: [],
       address: '',
+      ...DEFAULT_CLIENT_REMINDER_FIELDS,
     },
     {
       id: 'c3',
@@ -50,6 +58,7 @@ function seedData(): AppData {
       recurringLineItems: [],
       recurringCalendarExclusions: [],
       address: '',
+      ...DEFAULT_CLIENT_REMINDER_FIELDS,
     },
     {
       id: 'c4',
@@ -62,6 +71,7 @@ function seedData(): AppData {
       recurringLineItems: [],
       recurringCalendarExclusions: [],
       address: '',
+      ...DEFAULT_CLIENT_REMINDER_FIELDS,
     },
   ];
 
@@ -69,6 +79,7 @@ function seedData(): AppData {
     clients,
     calendarEntries: [],
     recurringCalendarExclusions: [],
+    emailHistory: [],
     settings: {
       businessName: 'Anthony Mercer',
       email: 'hello@anthonymercer.com',
@@ -77,6 +88,11 @@ function seedData(): AppData {
       paymentDetails: 'Bank transfer — Chase ****4821\nRouting: 021000021',
       defaultTaxRate: 0,
       defaultDueDays: 14,
+      reminderIntervalDays: 5,
+      lateReminderIntervalDays: 3,
+      paypalClientId: '',
+      paypalClientSecret: '',
+      paypalSandbox: true,
       logo: null,
       emailTemplates: normalizeEmailTemplates(),
     },
@@ -98,6 +114,10 @@ function seedData(): AppData {
         status: 'paid',
         publicToken: null,
         paidAt: daysFromNow(-30),
+        emailSendCount: 2,
+        lastEmailSentAt: daysFromNow(-32) + 'T14:30:00.000Z',
+        lastEmailSentKind: 'payment_received',
+        ...emptyInvoiceReminderSettings(),
         createdAt: daysFromNow(-45),
       },
       {
@@ -117,6 +137,10 @@ function seedData(): AppData {
         status: 'unpaid',
         publicToken: null,
         paidAt: null,
+        emailSendCount: 1,
+        lastEmailSentAt: daysFromNow(-18) + 'T09:15:00.000Z',
+        lastEmailSentKind: 'unpaid',
+        ...emptyInvoiceReminderSettings(),
         createdAt: daysFromNow(-20),
       },
       {
@@ -136,6 +160,10 @@ function seedData(): AppData {
         status: 'unpaid',
         publicToken: null,
         paidAt: null,
+        emailSendCount: 0,
+        lastEmailSentAt: null,
+        lastEmailSentKind: null,
+        ...emptyInvoiceReminderSettings(),
       },
       {
         id: 'inv4',
@@ -153,6 +181,10 @@ function seedData(): AppData {
         status: 'draft',
         publicToken: null,
         paidAt: null,
+        emailSendCount: 0,
+        lastEmailSentAt: null,
+        lastEmailSentKind: null,
+        ...emptyInvoiceReminderSettings(),
         createdAt: today(),
       },
     ],

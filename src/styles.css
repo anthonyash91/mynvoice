@@ -317,7 +317,12 @@
 .invoice-print-dates {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  height: 100%;
+  min-height: 100%;
+}
+
+.invoice-print-dates-due {
+  margin-top: auto;
 }
 
 .invoice-print-lines-section {
@@ -327,7 +332,7 @@
 .invoice-print-lines-header,
 .invoice-print-line-row {
   display: grid;
-  grid-template-columns: minmax(0, 12rem) 1fr 8.5rem 5.5rem;
+  grid-template-columns: minmax(0, 26rem) 1fr 8.5rem 5.5rem;
   gap: 12px;
   width: 100%;
 }
@@ -482,11 +487,6 @@
 .invoice-print-capture {
   width: 100%;
   background: #ffffff;
-}
-
-.invoice-print-capture .invoice-print-lines-header,
-.invoice-print-capture .invoice-print-line-row {
-  grid-template-columns: minmax(0, 26rem) 1fr 8.5rem 5.5rem;
 }
 
 @media print {

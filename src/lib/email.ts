@@ -45,6 +45,13 @@ export function validateInvoiceEmail(
   return null;
 }
 
+interface SendInvoiceEmailTracking {
+  invoiceId: string;
+  invoiceNumber: string;
+  clientName: string;
+  emailKind: EmailTemplateKind;
+}
+
 interface SendInvoiceEmailInput {
   to: string[];
   from: string;
@@ -52,6 +59,7 @@ interface SendInvoiceEmailInput {
   html: string;
   pdfBase64: string;
   filename: string;
+  tracking?: SendInvoiceEmailTracking;
 }
 
 export async function sendInvoiceEmail(input: SendInvoiceEmailInput): Promise<void> {
@@ -105,6 +113,12 @@ export async function sendInvoiceWithPdf(
     html: rendered.html,
     pdfBase64,
     filename: `${invoice.number}.pdf`,
+    tracking: {
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.number,
+      clientName: invoice.clientName,
+      emailKind: templateKind,
+    },
   });
 }
 

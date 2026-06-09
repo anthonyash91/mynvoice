@@ -332,6 +332,47 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
           className="w-full px-3 py-2 text-[13px] border border-border rounded bg-background outline-none focus:border-primary resize-none"
         />
       </Field>
+
+      <div>
+        <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
+          Reminder intervals
+        </div>
+        <p className="mb-3 text-[12px] leading-snug text-muted-foreground">
+          Optional overrides for this client. Leave blank to use your global Settings intervals.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Payment reminder (days)">
+            <TextInput
+              type="number"
+              value={
+                draft.reminderIntervalDays != null ? String(draft.reminderIntervalDays) : ''
+              }
+              onChange={(v) =>
+                set({
+                  reminderIntervalDays: v === '' ? null : Math.max(1, Number(v) || 1),
+                })
+              }
+              placeholder="Use global default"
+            />
+          </Field>
+          <Field label="Late notice (days)">
+            <TextInput
+              type="number"
+              value={
+                draft.lateReminderIntervalDays != null
+                  ? String(draft.lateReminderIntervalDays)
+                  : ''
+              }
+              onChange={(v) =>
+                set({
+                  lateReminderIntervalDays: v === '' ? null : Math.max(1, Number(v) || 1),
+                })
+              }
+              placeholder="Use global default"
+            />
+          </Field>
+        </div>
+      </div>
     </div>
   );
 }

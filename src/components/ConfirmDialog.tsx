@@ -35,7 +35,10 @@ export function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+    <div
+      data-confirm-dialog
+      className="fixed inset-0 z-[200] flex items-center justify-center p-6"
+    >
       <button
         type="button"
         aria-label="Close dialog"

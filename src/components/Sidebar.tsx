@@ -1,4 +1,4 @@
-import { CalendarDays, FileText, Mail, Plus, Settings, Users } from 'lucide-react';
+import { CalendarDays, FileText, History, Mail, Plus, Settings, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { View } from '@/types';
 
@@ -13,6 +13,7 @@ const navItems: { id: View; label: string; icon: typeof FileText }[] = [
   { id: 'invoices', label: 'Invoices', icon: FileText },
   { id: 'calendar', label: 'Calendar', icon: CalendarDays },
   { id: 'clients', label: 'Clients', icon: Users },
+  { id: 'history', label: 'History', icon: History },
   { id: 'templates', label: 'Templates', icon: Mail },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];

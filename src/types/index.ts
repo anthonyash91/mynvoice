@@ -1,14 +1,16 @@
-export type InvoiceStoredStatus = 'draft' | 'unpaid' | 'paid' | 'payment_sent';
+export type InvoiceStoredStatus = 'draft' | 'unpaid' | 'overdue' | 'paid' | 'payment_sent';
 export type InvoiceStatus = InvoiceStoredStatus | 'overdue';
 
-export type View = 'invoices' | 'clients' | 'calendar' | 'settings' | 'templates';
+export type View = 'invoices' | 'clients' | 'calendar' | 'history' | 'settings' | 'templates';
 
 export type Panel =
   | { kind: 'clients' }
+  | { kind: 'history' }
   | { kind: 'settings' }
   | { kind: 'templates' }
   | { kind: 'calendar-day'; date: string }
-  | { kind: 'invoice'; id: string }
+  | { kind: 'invoice'; id: string; from?: 'history' }
+  | { kind: 'edit-invoice'; id: string; from?: 'history' }
   | { kind: 'edit-client'; id: string }
   | { kind: 'new-client' }
   | { kind: 'new-invoice' };
@@ -61,7 +63,21 @@ export interface Invoice {
   status: InvoiceStoredStatus;
   publicToken: string | null;
   paidAt: string | null;
+  emailSendCount: number;
+  lastEmailSentAt: string | null;
+  lastEmailSentKind: EmailTemplateKind | null;
+  remindersPaused: boolean;
+  reminderSnoozeUntil: string | null;
+  reminderIntervalDaysOverride: number | null;
+  lateReminderIntervalDaysOverride: number | null;
   createdAt: string;
+}
+
+export interface InvoiceReminderSettings {
+  remindersPaused: boolean;
+  reminderSnoozeUntil: string | null;
+  reminderIntervalDaysOverride: number | null;
+  lateReminderIntervalDaysOverride: number | null;
 }
 
 export interface ClientRate {
@@ -92,6 +108,8 @@ export interface Client {
   recurringLineItems: RecurringLineItem[];
   recurringCalendarExclusions: ClientRecurringCalendarExclusion[];
   address: string;
+  reminderIntervalDays: number | null;
+  lateReminderIntervalDays: number | null;
 }
 
 export type EmailTemplateKind = 'unpaid' | 'reminder' | 'late' | 'payment_received';
@@ -119,8 +137,22 @@ export interface Settings {
   paymentDetails: string;
   defaultTaxRate: number;
   defaultDueDays: number;
+  reminderIntervalDays: number;
+  lateReminderIntervalDays: number;
+  paypalClientId: string;
+  paypalClientSecret: string;
+  paypalSandbox: boolean;
   logo: string | null;
   emailTemplates: EmailTemplates;
+}
+
+export interface EmailHistoryEntry {
+  id: string;
+  invoiceId: string | null;
+  invoiceNumber: string;
+  clientName: string;
+  emailKind: EmailTemplateKind;
+  sentAt: string;
 }
 
 export interface AppData {
@@ -128,6 +160,7 @@ export interface AppData {
   clients: Client[];
   calendarEntries: CalendarEntry[];
   recurringCalendarExclusions: RecurringCalendarExclusion[];
+  emailHistory: EmailHistoryEntry[];
   settings: Settings;
   nextInvoiceNumber: number;
 }
@@ -153,6 +186,7 @@ export function activeViewFromPanel(panel: Panel | null): View {
   ) {
     return 'clients';
   }
+  if (panel.kind === 'history') return 'history';
   if (panel.kind === 'settings') return 'settings';
   if (panel.kind === 'templates') return 'templates';
   if (panel.kind === 'calendar-day') return 'calendar';

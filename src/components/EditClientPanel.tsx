@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ClientFormFields } from '@/components/ClientFormFields';
 import { PanelShell } from '@/components/PanelShell';
-import { clientDisplayName, normalizeClientDraft } from '@/lib/client';
+import { clientDisplayName, normalizeClientDraft, type ClientDraft } from '@/lib/client';
 import { useConfirm } from '@/hooks/useConfirm';
 import type { Client } from '@/types';
 
@@ -14,7 +14,7 @@ interface EditClientPanelProps {
 
 export function EditClientPanel({ client, onClose, onSave, onDelete }: EditClientPanelProps) {
   const confirm = useConfirm();
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<ClientDraft>({
     companyName: client.companyName,
     owner: client.owner,
     primaryEmail: client.primaryEmail,
@@ -26,6 +26,8 @@ export function EditClientPanel({ client, onClose, onSave, onDelete }: EditClien
       ...item,
     })),
     address: client.address,
+    reminderIntervalDays: client.reminderIntervalDays,
+    lateReminderIntervalDays: client.lateReminderIntervalDays,
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -58,7 +60,7 @@ export function EditClientPanel({ client, onClose, onSave, onDelete }: EditClien
   };
 
   return (
-    <PanelShell title={clientDisplayName(client)} onClose={onClose}>
+    <PanelShell title={clientDisplayName(client)} onClose={onClose} fillWidth>
       <div className="w-full flex flex-col gap-4 px-6 pt-5 pb-6">
         <ClientFormFields draft={draft} onChange={setDraft} />
         <div className="border-t border-border pt-[22px] flex justify-between gap-2">

@@ -5,6 +5,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface SendInvoiceTracking {
+  invoiceId?: string;
+  invoiceNumber?: string;
+  clientName?: string;
+  emailKind?: string;
+}
+
 interface SendInvoiceRequest {
   to?: string[];
   from?: string;
@@ -12,6 +19,7 @@ interface SendInvoiceRequest {
   html?: string;
   pdfBase64?: string;
   filename?: string;
+  tracking?: SendInvoiceTracking;
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
@@ -142,6 +150,27 @@ Deno.serve(async (req) => {
         },
         resendResponse.status
       );
+    }
+
+    const tracking = body.tracking;
+    if (
+      tracking?.invoiceId &&
+      tracking.invoiceNumber &&
+      tracking.clientName &&
+      tracking.emailKind
+    ) {
+      const { error: historyError } = await supabase.from('invoice_email_history').insert({
+        user_id: user.id,
+        invoice_id: tracking.invoiceId,
+        invoice_number: tracking.invoiceNumber,
+        client_name: tracking.clientName,
+        email_kind: tracking.emailKind,
+        sent_at: new Date().toISOString(),
+      });
+
+      if (historyError) {
+        console.error('Failed to record invoice email history:', historyError.message);
+      }
     }
 
     return jsonResponse({ ok: true, id: resendData.id ?? null });

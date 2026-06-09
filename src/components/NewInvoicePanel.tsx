@@ -14,19 +14,20 @@ import type {
   RecurringCalendarExclusion,
   Settings,
 } from '@/types';
-import { calculateTotal, formatCurrency, formatDate } from '@/lib/calculations';
+import { calculateTotal, formatCurrency, formatDate, formatDateLong } from '@/lib/calculations';
 import { formatDurationQuantity } from '@/lib/duration';
 import { clientInvoiceName } from '@/lib/client';
 import { ImportedLineItemEditForm } from '@/components/ImportedLineItemEditForm';
 import { LineItemTypeBadge } from '@/components/LineItemTypeBadge';
 import { lineItemKindFromLineItem } from '@/lib/lineItem';
 import {
+  addableCalendarEntriesForInvoice,
   calendarEntriesToLineItems,
   calendarEntryToLineItem,
-  invoiceCalendarEntries,
+  formatCalendarEntryAmount,
   isEmptyFixedCalendarEntry,
-  isLineItemVisibleOnInvoice,
-  syncImportedLineItems,
+  isRecurringCalendarEntry,
+  syncRecurringImportedLineItems,
 } from '@/lib/calendar';
 import { nextInvoiceNumberForClient, resolveClientIdForInvoice } from '@/lib/invoice';
 import {
@@ -42,8 +43,10 @@ interface NewInvoicePanelProps {
   calendarEntries: CalendarEntry[];
   recurringCalendarExclusions: RecurringCalendarExclusion[];
   settings: Settings;
+  editingInvoice?: Invoice;
   onClose: () => void;
   onSave: (draft: InvoiceDraft, status: 'draft' | 'unpaid') => Promise<void>;
+  onUpdate?: (draft: InvoiceDraft) => Promise<void>;
   onAddCalendarEntry: (entry: Omit<CalendarEntry, 'id'>) => Promise<CalendarEntry>;
   onUpdateCalendarEntry: (entry: CalendarEntry) => Promise<unknown>;
   onDeleteCalendarEntry: (entryId: string) => Promise<unknown>;
@@ -129,7 +132,7 @@ function ImportedInvoiceLineItem({ item }: { item: LineItem }) {
         </div>
       </Tooltip>
       <LineItemTypeCell kind={lineItemKindFromLineItem(item)} />
-      <div className="text-left tabular-nums">{formatCurrency(amount)}</div>
+      <div className="text-left tabular-nums pl-1">{formatCurrency(amount)}</div>
     </>
   );
 }
@@ -140,33 +143,43 @@ export function NewInvoicePanel({
   calendarEntries,
   recurringCalendarExclusions,
   settings,
+  editingInvoice,
   onClose,
   onSave,
+  onUpdate,
   onAddCalendarEntry,
   onUpdateCalendarEntry,
   onDeleteCalendarEntry,
 }: NewInvoicePanelProps) {
   const confirm = useConfirm();
-  const [clientQuery, setClientQuery] = useState('');
-  const [clientId, setClientId] = useState('');
+  const isEditMode = Boolean(editingInvoice);
+  const [clientQuery, setClientQuery] = useState(editingInvoice?.clientName ?? '');
+  const [clientId, setClientId] = useState(editingInvoice?.clientId ?? '');
   const suggestedNumber = useMemo(
     () => nextInvoiceNumberForClient(invoices, clients, clientId, clientQuery),
     [invoices, clients, clientId, clientQuery]
   );
-  const [number, setNumber] = useState(suggestedNumber);
-  const [numberEdited, setNumberEdited] = useState(false);
-  const [issueDate, setIssueDate] = useState(today());
-  const [dueOn, setDueOn] = useState(true);
-  const [dueDate, setDueDate] = useState(daysFromNow(settings.defaultDueDays));
-  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [number, setNumber] = useState(editingInvoice?.number ?? suggestedNumber);
+  const [numberEdited, setNumberEdited] = useState(Boolean(editingInvoice));
+  const [issueDate, setIssueDate] = useState(editingInvoice?.issueDate ?? today());
+  const [dueOn, setDueOn] = useState(editingInvoice ? Boolean(editingInvoice.dueDate) : true);
+  const [dueDate, setDueDate] = useState(
+    editingInvoice?.dueDate ?? daysFromNow(settings.defaultDueDays)
+  );
+  const [lineItems, setLineItems] = useState<LineItem[]>(editingInvoice?.lineItems ?? []);
   const [editingLineItemId, setEditingLineItemId] = useState<string | null>(null);
+  const [editingCalendarEntryId, setEditingCalendarEntryId] = useState<string | null>(null);
   const [addingFixedItem, setAddingFixedItem] = useState(false);
   const [excludedCalendarEntryIds, setExcludedCalendarEntryIds] = useState<Set<string>>(
     () => new Set()
   );
-  const [notes, setNotes] = useState('');
-  const [taxOn, setTaxOn] = useState(Boolean(settings.defaultTaxRate));
-  const [taxRate, setTaxRate] = useState(settings.defaultTaxRate);
+  const [notes, setNotes] = useState(editingInvoice?.notes ?? '');
+  const [taxOn, setTaxOn] = useState(
+    editingInvoice ? editingInvoice.taxEnabled : Boolean(settings.defaultTaxRate)
+  );
+  const [taxRate, setTaxRate] = useState(
+    editingInvoice ? editingInvoice.taxRate : settings.defaultTaxRate
+  );
 
   const resolvedClientId = useMemo(
     () => resolveClientIdForInvoice(clients, clientId, clientQuery),
@@ -174,14 +187,17 @@ export function NewInvoicePanel({
   );
   const selectedClient = clients.find((c) => c.id === clientId);
   const invoiceClient = clients.find((c) => c.id === resolvedClientId);
-  const prevClientRef = useRef(resolvedClientId);
+  const prevClientRef = useRef(editingInvoice?.clientId ?? resolvedClientId);
   const applyingRecurringRef = useRef(false);
 
   useEffect(() => {
-    if (!numberEdited) setNumber(suggestedNumber);
-  }, [suggestedNumber, numberEdited]);
+    if (isEditMode || numberEdited) return;
+    setNumber(suggestedNumber);
+  }, [suggestedNumber, numberEdited, isEditMode]);
 
   useEffect(() => {
+    if (isEditMode) return;
+
     if (!resolvedClientId) {
       setLineItems([]);
       setEditingLineItemId(null);
@@ -192,29 +208,34 @@ export function NewInvoicePanel({
     if (prevClientRef.current !== resolvedClientId) {
       setEditingLineItemId(null);
       setExcludedCalendarEntryIds(new Set());
-      const clientEntries = invoiceCalendarEntries(
-        calendarEntries,
-        resolvedClientId,
-        issueDate
-      );
-      setLineItems(calendarEntriesToLineItems(clientEntries));
+      setLineItems([]);
       prevClientRef.current = resolvedClientId;
-      return;
     }
+  }, [resolvedClientId, isEditMode]);
+
+  useEffect(() => {
+    if (!resolvedClientId || !issueDate) return;
 
     setLineItems((prev) =>
-      syncImportedLineItems(
+      syncRecurringImportedLineItems(
         prev,
         calendarEntries,
         resolvedClientId,
         issueDate,
-        excludedCalendarEntryIds
+        excludedCalendarEntryIds,
+        editingInvoice?.id
       )
     );
-  }, [resolvedClientId, issueDate, calendarEntries, excludedCalendarEntryIds]);
+  }, [
+    resolvedClientId,
+    issueDate,
+    calendarEntries,
+    excludedCalendarEntryIds,
+    editingInvoice?.id,
+  ]);
 
   useEffect(() => {
-    if (!resolvedClientId || !issueDate || !invoiceClient) return;
+    if (isEditMode || !resolvedClientId || !issueDate || !invoiceClient) return;
 
     let cancelled = false;
 
@@ -253,6 +274,7 @@ export function NewInvoicePanel({
     calendarEntries,
     recurringCalendarExclusions,
     onAddCalendarEntry,
+    isEditMode,
   ]);
 
   const visibleLineItems = useMemo(
@@ -260,10 +282,31 @@ export function NewInvoicePanel({
       lineItems.filter(
         (item) =>
           item.id === editingLineItemId ||
-          isLineItemVisibleOnInvoice(item, calendarEntries, resolvedClientId, issueDate)
+          item.description.trim().length > 0 ||
+          item.rate > 0 ||
+          Boolean(item.sourceCalendarEntryId)
       ),
-    [lineItems, calendarEntries, resolvedClientId, issueDate, editingLineItemId]
+    [lineItems, editingLineItemId]
   );
+
+  const addableCalendarEntries = useMemo(() => {
+    if (!resolvedClientId) return [];
+    return addableCalendarEntriesForInvoice(
+      calendarEntries,
+      resolvedClientId,
+      lineItems,
+      excludedCalendarEntryIds,
+      issueDate,
+      editingInvoice?.id
+    );
+  }, [
+    resolvedClientId,
+    calendarEntries,
+    lineItems,
+    excludedCalendarEntryIds,
+    issueDate,
+    editingInvoice?.id,
+  ]);
 
   const totals = calculateTotal(visibleLineItems, taxOn, taxRate);
 
@@ -281,6 +324,37 @@ export function NewInvoicePanel({
 
   const updateItem = (id: string, patch: Partial<LineItem>) =>
     setLineItems((arr) => arr.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+
+  const addCalendarEntryToInvoice = (entry: CalendarEntry) => {
+    setEditingCalendarEntryId((id) => (id === entry.id ? null : id));
+    const lineItem = calendarEntryToLineItem(entry);
+    setLineItems((prev) =>
+      [...prev, lineItem].sort((a, b) => (a.sourceDate ?? '').localeCompare(b.sourceDate ?? ''))
+    );
+    setExcludedCalendarEntryIds((ids) => {
+      if (!ids.has(entry.id)) return ids;
+      const next = new Set(ids);
+      next.delete(entry.id);
+      return next;
+    });
+  };
+
+  const addAllCalendarEntriesToInvoice = () => {
+    const imported = calendarEntriesToLineItems(addableCalendarEntries);
+    setLineItems((prev) => {
+      const merged = [...prev, ...imported].sort((a, b) =>
+        (a.sourceDate ?? '').localeCompare(b.sourceDate ?? '')
+      );
+      return merged;
+    });
+    setExcludedCalendarEntryIds((ids) => {
+      const next = new Set(ids);
+      for (const entry of addableCalendarEntries) {
+        next.delete(entry.id);
+      }
+      return next;
+    });
+  };
 
   const addFixedItem = async () => {
     if (!resolvedClientId || addingFixedItem) return;
@@ -308,6 +382,7 @@ export function NewInvoicePanel({
           (a.sourceDate ?? '').localeCompare(b.sourceDate ?? '')
         );
       });
+      setEditingCalendarEntryId(null);
       setEditingLineItemId(lineItem.id);
     } finally {
       setAddingFixedItem(false);
@@ -331,9 +406,16 @@ export function NewInvoicePanel({
       if (entry && isEmptyFixedCalendarEntry(entry)) {
         await onDeleteCalendarEntry(entry.id);
       } else {
+        const isRecurring =
+          (entry && isRecurringCalendarEntry(entry)) ||
+          Boolean(item.sourceRecurringLineItemId);
         setExcludedCalendarEntryIds((ids) => {
           const next = new Set(ids);
-          next.add(item.sourceCalendarEntryId!);
+          if (isRecurring) {
+            next.add(item.sourceCalendarEntryId!);
+          } else {
+            next.delete(item.sourceCalendarEntryId!);
+          }
           return next;
         });
       }
@@ -354,6 +436,17 @@ export function NewInvoicePanel({
     }
   };
 
+  const handleUpdate = async () => {
+    const draft = buildDraft();
+    if (!draft.clientName.trim() || !onUpdate) return;
+    setSaving(true);
+    try {
+      await onUpdate(draft);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="inline-flex flex-col h-full max-w-full">
       <div className="flex h-14 w-full shrink-0 items-center justify-between overflow-hidden border-b border-border px-6 no-print">
@@ -366,7 +459,7 @@ export function NewInvoicePanel({
             <X className="h-4 w-4" />
           </button>
           <span className="inline-flex h-7 shrink-0 items-center text-[15px] font-medium leading-none">
-            New invoice
+            {isEditMode ? 'Edit invoice' : 'New invoice'}
           </span>
         </div>
         <span className="inline-flex h-7 shrink-0 items-center font-mono text-[15px] font-normal leading-none text-muted-foreground">
@@ -428,6 +521,90 @@ export function NewInvoicePanel({
         </div>
 
         <div>
+          {resolvedClientId && (
+            <div className="mb-5 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
+                  Add from calendar
+                </div>
+                {addableCalendarEntries.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={addAllCalendarEntriesToInvoice}
+                    className="text-[12px] text-primary hover:underline"
+                  >
+                    Add all
+                  </button>
+                )}
+              </div>
+              {addableCalendarEntries.length === 0 ? (
+                <p className="text-[13px] text-muted-foreground">
+                  No unbilled calendar entries are available for this client in the current or
+                  prior billing month.
+                </p>
+              ) : (
+                <div className="rounded border border-border divide-y divide-border">
+                  {addableCalendarEntries.map((entry) => {
+                    const isEditingEntry = editingCalendarEntryId === entry.id;
+                    const editClient =
+                      clients.find((c) => c.id === entry.clientId) ??
+                      invoiceClient ??
+                      selectedClient;
+
+                    return (
+                      <div key={entry.id} className="text-[13px]">
+                        {isEditingEntry && editClient ? (
+                          <ImportedLineItemEditForm
+                            item={calendarEntryToLineItem(entry)}
+                            calendarEntry={entry}
+                            client={editClient}
+                            onSave={async (updated) => {
+                              await onUpdateCalendarEntry(updated);
+                              setEditingCalendarEntryId(null);
+                            }}
+                            onCancel={() => setEditingCalendarEntryId(null)}
+                          />
+                        ) : (
+                          <div className="flex items-center gap-3 px-3 py-2.5">
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate">
+                                {entry.description.trim() || 'Work logged'}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                                {formatDateLong(entry.date)} · {formatCalendarEntryAmount(entry)}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingLineItemId(null);
+                                  setEditingCalendarEntryId(entry.id);
+                                }}
+                                className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                                aria-label="Edit calendar entry"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => addCalendarEntryToInvoice(entry)}
+                                className="flex items-center gap-1 rounded px-2 py-1 text-[12px] text-primary hover:bg-secondary"
+                              >
+                                <Plus className="h-3 w-3" />
+                                Add
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
             Line items
           </div>
@@ -443,7 +620,7 @@ export function NewInvoicePanel({
               >
                 <div>Description</div>
                 <div>Type</div>
-                <div className="text-left">Amount</div>
+                <div className="text-left pl-1">Amount</div>
                 <div />
               </div>
               {visibleLineItems.map((item) => {
@@ -465,7 +642,10 @@ export function NewInvoicePanel({
                 : null;
               const isEditing = editingLineItemId === item.id;
               const showEditForm =
-                isImported && isEditing && editCalendarEntry && editClient;
+                isEditing &&
+                editCalendarEntry &&
+                editClient &&
+                isEmptyFixedCalendarEntry(editCalendarEntry);
 
               return (
                 <div
@@ -520,26 +700,15 @@ export function NewInvoicePanel({
                             onChange={(e) =>
                               updateItem(item.id, { rate: Number(e.target.value) || 0 })
                             }
-                            className="h-7 w-full bg-transparent text-left outline-none tabular-nums"
+                            className="h-7 w-full bg-transparent pl-1 text-left outline-none tabular-nums"
                           />
                         </>
                       )}
                       <div className="flex items-center justify-end gap-1.5">
-                        {isImported && (
-                          <button
-                            type="button"
-                            onClick={() => setEditingLineItemId(item.id)}
-                            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                            aria-label="Edit line item"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                        )}
                         <button
                           type="button"
                           onClick={() => removeLineItem(item)}
-                          disabled={visibleLineItems.length === 1}
-                          className="rounded py-0.5 pl-0.5 pr-3 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                          className="rounded py-0.5 pl-0.5 pr-3 text-muted-foreground hover:text-destructive"
                           aria-label="Remove line item"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -573,7 +742,7 @@ export function NewInvoicePanel({
           />
         </Field>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end pb-[6px]">
           <div className="w-72 space-y-1.5 text-[13px]">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Subtotal</span>
@@ -611,20 +780,32 @@ export function NewInvoicePanel({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border pt-[22px]">
-          <button
-            onClick={() => handleSave('draft')}
-            disabled={saving}
-            className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save as Draft'}
-          </button>
-          <button
-            onClick={() => handleSave('unpaid')}
-            disabled={saving}
-            className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          {isEditMode ? (
+            <button
+              onClick={handleUpdate}
+              disabled={saving}
+              className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => handleSave('draft')}
+                disabled={saving}
+                className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save as Draft'}
+              </button>
+              <button
+                onClick={() => handleSave('unpaid')}
+                disabled={saving}
+                className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

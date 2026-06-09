@@ -26,7 +26,7 @@ export function NewClientPanel({ onClose, onSave }: NewClientPanelProps) {
   };
 
   return (
-    <PanelShell title="New client" onClose={onClose} backArrow>
+    <PanelShell title="New client" onClose={onClose} backArrow fillWidth>
       <div className="w-full flex flex-col gap-4 px-6 pt-5 pb-6">
         <ClientFormFields draft={draft} onChange={setDraft} />
         <div className="border-t border-border pt-[22px] flex justify-end gap-2">

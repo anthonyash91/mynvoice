@@ -1,4 +1,20 @@
-import type { Client, Invoice, InvoiceStatus } from '../types';
+import { formatDate, formatDateLong } from '@/lib/calculations';
+import type {
+  Client,
+  Invoice,
+  InvoiceReminderSettings,
+  InvoiceStatus,
+  InvoiceStoredStatus,
+} from '../types';
+
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+export const INVOICE_STORED_STATUSES: InvoiceStoredStatus[] = [
+  'draft',
+  'unpaid',
+  'payment_sent',
+  'paid',
+];
 
 export function formatInvoiceNumber(n: number): string {
   return `INV-${String(n).padStart(3, '0')}`;
@@ -35,7 +51,8 @@ export function resolveStatus(invoice: Invoice): InvoiceStatus {
   if (
     invoice.status === 'paid' ||
     invoice.status === 'draft' ||
-    invoice.status === 'payment_sent'
+    invoice.status === 'payment_sent' ||
+    invoice.status === 'overdue'
   ) {
     return invoice.status;
   }
@@ -50,6 +67,88 @@ export function resolveStatus(invoice: Invoice): InvoiceStatus {
   return invoice.status;
 }
 
+export function isInvoicePastDue(
+  invoice: Pick<Invoice, 'dueDate'>,
+  now = new Date()
+): boolean {
+  if (!invoice.dueDate) return false;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(`${invoice.dueDate}T00:00:00`);
+  return due < today;
+}
+
+export function localTodayDateString(now = new Date()): string {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export interface InvoiceReminderIntervals {
+  reminderIntervalDays: number;
+  lateReminderIntervalDays: number;
+}
+
+function positiveInterval(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value < 1) return fallback;
+  return Math.floor(value);
+}
+
+export function resolveReminderIntervals(
+  invoice: Pick<
+    Invoice,
+    | 'status'
+    | 'reminderIntervalDaysOverride'
+    | 'lateReminderIntervalDaysOverride'
+  >,
+  settings: InvoiceReminderIntervals,
+  client?: Pick<Client, 'reminderIntervalDays' | 'lateReminderIntervalDays'> | null
+): InvoiceReminderIntervals {
+  const globalUnpaid = positiveInterval(settings.reminderIntervalDays, 5);
+  const globalLate = positiveInterval(settings.lateReminderIntervalDays, 3);
+
+  return {
+    reminderIntervalDays:
+      invoice.reminderIntervalDaysOverride ??
+      client?.reminderIntervalDays ??
+      globalUnpaid,
+    lateReminderIntervalDays:
+      invoice.lateReminderIntervalDaysOverride ??
+      client?.lateReminderIntervalDays ??
+      globalLate,
+  };
+}
+
+export function automaticRemindersBlocked(
+  invoice: Pick<Invoice, 'remindersPaused' | 'reminderSnoozeUntil'>,
+  now = new Date()
+): boolean {
+  if (invoice.remindersPaused) return true;
+  if (!invoice.reminderSnoozeUntil) return false;
+  return invoice.reminderSnoozeUntil > localTodayDateString(now);
+}
+
+function intervalSourceNote(
+  invoice: Pick<Invoice, 'reminderIntervalDaysOverride' | 'lateReminderIntervalDaysOverride'>,
+  client: Pick<Client, 'reminderIntervalDays' | 'lateReminderIntervalDays'> | null | undefined,
+  kind: 'unpaid' | 'late'
+): string {
+  if (kind === 'unpaid' && invoice.reminderIntervalDaysOverride != null) {
+    return 'Using invoice reminder interval override.';
+  }
+  if (kind === 'late' && invoice.lateReminderIntervalDaysOverride != null) {
+    return 'Using invoice late-notice interval override.';
+  }
+  if (kind === 'unpaid' && client?.reminderIntervalDays != null) {
+    return 'Using client reminder interval override.';
+  }
+  if (kind === 'late' && client?.lateReminderIntervalDays != null) {
+    return 'Using client late-notice interval override.';
+  }
+  return 'Using global interval from Settings.';
+}
+
 export function todayDateString(): string {
   return new Date().toISOString().split('T')[0];
 }
@@ -62,6 +161,239 @@ export function formatPaymentDate(paidAt: string | null | undefined): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function localDateStringFromMs(ms: number): string {
+  const date = new Date(ms);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function utcDateStringFromMs(ms: number): string {
+  const date = new Date(ms);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function nextCronRunUtcMs(now = Date.now()): number {
+  const nowDate = new Date(now);
+  const runToday = Date.UTC(
+    nowDate.getUTCFullYear(),
+    nowDate.getUTCMonth(),
+    nowDate.getUTCDate(),
+    9,
+    0,
+    0,
+    0
+  );
+  if (now < runToday) return runToday;
+  return runToday + MS_PER_DAY;
+}
+
+function daysLeftLabel(days: number): string {
+  if (days === 1) return '1 day';
+  return `${days} days`;
+}
+
+function calendarDaysUntil(dueDate: string, now = new Date()): number {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(`${dueDate}T00:00:00`);
+  return Math.round((due.getTime() - today.getTime()) / MS_PER_DAY);
+}
+
+export function invoiceDueDisplay(
+  invoice: Invoice,
+  now = new Date()
+): { label: string; tooltip: string } {
+  if (!invoice.dueDate) {
+    return {
+      label: '—',
+      tooltip: 'No due date set.',
+    };
+  }
+
+  const dueDateFormatted = formatDate(invoice.dueDate);
+  const daysUntil = calendarDaysUntil(invoice.dueDate, now);
+
+  if (daysUntil >= 0) {
+    return {
+      label: daysLeftLabel(daysUntil),
+      tooltip:
+        daysUntil === 0
+          ? `Due on ${dueDateFormatted} (due today).`
+          : `Due on ${dueDateFormatted} (${daysLeftLabel(daysUntil)} left).`,
+    };
+  }
+
+  const overdueDays = Math.abs(daysUntil);
+  const overdueLabel = overdueDays === 1 ? '1 day overdue' : `${overdueDays} days overdue`;
+
+  return {
+    label: overdueLabel,
+    tooltip: `Due on ${dueDateFormatted} (${overdueLabel}).`,
+  };
+}
+
+function reminderIntervalForInvoice(
+  invoice: Pick<Invoice, 'status'>,
+  intervals: InvoiceReminderIntervals
+): number | null {
+  if (invoice.status === 'overdue') {
+    return Math.max(1, intervals.lateReminderIntervalDays);
+  }
+  if (invoice.status === 'unpaid' || invoice.status === 'draft') {
+    return Math.max(1, intervals.reminderIntervalDays);
+  }
+  return null;
+}
+
+function nextScheduledEmailDate(
+  lastSentMs: number,
+  interval: number,
+  now: number
+): string {
+  const daysSinceLastSend = Math.floor((now - lastSentMs) / MS_PER_DAY);
+  const daysLeft = Math.max(0, interval - daysSinceLastSend);
+  const dateStr =
+    daysLeft === 0
+      ? utcDateStringFromMs(nextCronRunUtcMs(now))
+      : localDateStringFromMs(lastSentMs + interval * MS_PER_DAY);
+  return formatDateLong(dateStr);
+}
+
+export function invoiceNextReminderDate(
+  invoice: Pick<
+    Invoice,
+    | 'status'
+    | 'emailSendCount'
+    | 'lastEmailSentAt'
+    | 'remindersPaused'
+    | 'reminderSnoozeUntil'
+    | 'reminderIntervalDaysOverride'
+    | 'lateReminderIntervalDaysOverride'
+  >,
+  intervals: InvoiceReminderIntervals,
+  options?: {
+    forOutgoingEmail?: boolean;
+    now?: number;
+    client?: Pick<Client, 'reminderIntervalDays' | 'lateReminderIntervalDays'> | null;
+  }
+): string {
+  const now = options?.now ?? Date.now();
+  const forOutgoing = options?.forOutgoingEmail ?? false;
+  const resolved = resolveReminderIntervals(invoice, intervals, options?.client ?? null);
+  const interval = reminderIntervalForInvoice(invoice, resolved);
+
+  if (interval === null || automaticRemindersBlocked(invoice, new Date(now))) return '—';
+
+  if (forOutgoing) {
+    return formatDateLong(localDateStringFromMs(now + interval * MS_PER_DAY));
+  }
+
+  if (invoice.emailSendCount <= 0 || !invoice.lastEmailSentAt) return '—';
+
+  return nextScheduledEmailDate(
+    new Date(invoice.lastEmailSentAt).getTime(),
+    interval,
+    now
+  );
+}
+
+export function invoiceEmailSendCountForTemplate(
+  invoice: Pick<Invoice, 'emailSendCount'>,
+  forOutgoingEmail = false
+): string {
+  const count = forOutgoingEmail ? invoice.emailSendCount + 1 : invoice.emailSendCount;
+  return String(Math.max(0, count));
+}
+
+export function invoiceReminderDisplay(
+  invoice: Invoice,
+  intervals: InvoiceReminderIntervals,
+  options?: {
+    now?: number;
+    client?: Pick<Client, 'reminderIntervalDays' | 'lateReminderIntervalDays'> | null;
+  }
+): { label: string; tooltip: string } {
+  const now = options?.now ?? Date.now();
+  const client = options?.client ?? null;
+  const resolved = resolveReminderIntervals(invoice, intervals, client);
+  const unpaidInterval = Math.max(1, resolved.reminderIntervalDays);
+  const lateInterval = Math.max(1, resolved.lateReminderIntervalDays);
+  const unpaidNote = `Unpaid invoices receive an automatic reminder every ${unpaidInterval} day${unpaidInterval === 1 ? '' : 's'} after the last email.`;
+  const lateNote = `Overdue invoices receive a late notice every ${lateInterval} day${lateInterval === 1 ? '' : 's'} after the last email.`;
+  const settingsNote = 'Change default intervals in Settings.';
+
+  if (invoice.status !== 'unpaid' && invoice.status !== 'overdue') {
+    return {
+      label: '—',
+      tooltip: `Automatic emails are only sent for unpaid or overdue invoices. ${unpaidNote} ${lateNote} ${settingsNote}`,
+    };
+  }
+
+  if (automaticRemindersBlocked(invoice, new Date(now))) {
+    if (invoice.remindersPaused) {
+      return {
+        label: 'Paused',
+        tooltip: 'Automatic reminders are paused for this invoice. Resume from the invoice panel.',
+      };
+    }
+
+    const snoozeDate = formatDateLong(invoice.reminderSnoozeUntil!);
+    return {
+      label: 'Snoozed',
+      tooltip: `Automatic reminders are snoozed until ${snoozeDate}.`,
+    };
+  }
+
+  if (invoice.emailSendCount <= 0 || !invoice.lastEmailSentAt) {
+    return {
+      label: '—',
+      tooltip: `Send the invoice first. ${unpaidNote} ${settingsNote}`,
+    };
+  }
+
+  const kind = invoice.status === 'overdue' ? 'late' : 'unpaid';
+  const interval = kind === 'late' ? lateInterval : unpaidInterval;
+  const emailLabel = kind === 'late' ? 'late notice' : 'reminder';
+  const sourceNote = intervalSourceNote(invoice, client, kind);
+  const intervalNote =
+    kind === 'late'
+      ? `${lateNote} ${sourceNote}`
+      : `${unpaidNote} ${sourceNote}`;
+
+  const lastSentMs = new Date(invoice.lastEmailSentAt).getTime();
+  const daysSinceLastSend = Math.floor((now - lastSentMs) / MS_PER_DAY);
+  const daysLeft = Math.max(0, interval - daysSinceLastSend);
+
+  if (daysLeft === 0) {
+    const sendDate = formatDate(utcDateStringFromMs(nextCronRunUtcMs(now)));
+    return {
+      label: daysLeftLabel(0),
+      tooltip: `Next ${emailLabel} on ${sendDate} (due now; sent on the daily run at 9:00 AM UTC). ${intervalNote}`,
+    };
+  }
+
+  const sendDate = formatDate(localDateStringFromMs(lastSentMs + interval * MS_PER_DAY));
+
+  return {
+    label: daysLeftLabel(daysLeft),
+    tooltip: `Next ${emailLabel} on ${sendDate} (${daysLeftLabel(daysLeft)} left). ${intervalNote}`,
+  };
+}
+
+export function emptyInvoiceReminderSettings(): InvoiceReminderSettings {
+  return {
+    remindersPaused: false,
+    reminderSnoozeUntil: null,
+    reminderIntervalDaysOverride: null,
+    lateReminderIntervalDaysOverride: null,
+  };
 }
 
 export function statusLabel(status: InvoiceStatus): string {

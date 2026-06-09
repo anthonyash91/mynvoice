@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "functions:serve": "supabase functions serve invoice-public --no-verify-jwt",
-    "functions:deploy": "supabase functions deploy send-invoice && supabase functions deploy invoice-public"
+    "functions:deploy": "supabase functions deploy send-invoice && supabase functions deploy invoice-public && supabase functions deploy send-invoice-reminders"
   },
   "dependencies": {
     "@radix-ui/react-switch": "^1.3.0",

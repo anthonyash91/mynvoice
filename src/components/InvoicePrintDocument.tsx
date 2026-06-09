@@ -26,20 +26,25 @@ interface InvoicePrintDocumentProps {
   invoice: Invoice;
   client: Client | null;
   settings: Settings;
+  printId?: string;
 }
 
 export function InvoicePrintDocument({
   invoice,
   client,
   settings,
+  printId,
 }: InvoicePrintDocumentProps) {
   const totals = calculateTotal(invoice.lineItems, invoice.taxEnabled, invoice.taxRate);
   const rateBreakdown = buildRateBreakdown(invoice.lineItems);
   const status = resolveStatus(invoice);
   const [addressLineOne, addressLineTwo] = splitStreetAndCityLines(settings.businessAddress);
+  const [clientAddressLineOne, clientAddressLineTwo] = client?.address
+    ? splitStreetAndCityLines(client.address)
+    : ['', ''];
 
   return (
-    <article className="invoice-print text-[13px]">
+    <article id={printId} className="invoice-print text-[13px]">
       <header className="invoice-print-header invoice-print-pdf-avoid-break">
         <div className="invoice-print-header-main">
           <div className="invoice-print-header-column">
@@ -77,7 +82,12 @@ export function InvoicePrintDocument({
           {client?.primaryEmail && (
             <div className="invoice-print-muted">{client.primaryEmail}</div>
           )}
-          {client?.address && <div className="invoice-print-muted">{client.address}</div>}
+          {client?.address && (
+            <>
+              <div className="invoice-print-muted">{clientAddressLineOne}</div>
+              <div className="invoice-print-muted whitespace-pre-line">{clientAddressLineTwo}</div>
+            </>
+          )}
         </div>
         <div className="invoice-print-right invoice-print-dates">
           <div>
@@ -85,7 +95,7 @@ export function InvoicePrintDocument({
             <div>{formatDateLong(invoice.issueDate)}</div>
           </div>
           {invoice.dueDate && (
-            <div>
+            <div className="invoice-print-dates-due">
               <div className="invoice-print-label">Due</div>
               <div>{formatDateLong(invoice.dueDate)}</div>
             </div>

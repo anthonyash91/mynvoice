@@ -1,3 +1,4 @@
+import { emptyInvoiceReminderSettings } from '@/lib/invoice';
 import { supabase } from '@/lib/supabase';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
 
@@ -5,6 +6,12 @@ export type PublicInvoiceClient = Pick<
   Client,
   'companyName' | 'owner' | 'primaryEmail' | 'additionalEmails' | 'address'
 >;
+
+export interface PublicPayPalConfig {
+  enabled: boolean;
+  clientId: string;
+  sandbox: boolean;
+}
 
 export interface PublicInvoicePayload {
   invoice: Omit<Invoice, 'id' | 'publicToken'> & { status: InvoiceStoredStatus | 'paid' };
@@ -18,7 +25,9 @@ export interface PublicInvoicePayload {
     | 'defaultTaxRate'
     | 'defaultDueDays'
     | 'logo'
-  >;
+  > & {
+    paypal: PublicPayPalConfig;
+  };
   client: PublicInvoiceClient;
 }
 
@@ -31,10 +40,13 @@ interface PublicInvoiceResponse {
   alreadyPaid?: boolean;
   invoiceNumber?: string;
   clientName?: string;
+  orderId?: string;
   error?: string;
 }
 
-async function invokeInvoicePublic(body: Record<string, string>): Promise<PublicInvoiceResponse> {
+async function invokeInvoicePublic(
+  body: Record<string, string>
+): Promise<PublicInvoiceResponse> {
   const { data, error } = await supabase.functions.invoke('invoice-public', { body });
 
   if (error) {
@@ -79,6 +91,7 @@ function mergePublicSettings(
     defaultTaxRate: next.defaultTaxRate ?? previous.defaultTaxRate,
     defaultDueDays: next.defaultDueDays ?? previous.defaultDueDays,
     logo: next.logo ?? previous.logo,
+    paypal: next.paypal.enabled ? next.paypal : previous.paypal,
   };
 }
 
@@ -131,6 +144,26 @@ export async function markPublicPaymentSent(token: string): Promise<PublicInvoic
   return normalizePublicPayload(response);
 }
 
+export async function createPayPalOrder(token: string): Promise<{ orderId: string }> {
+  const response = await invokeInvoicePublic({ action: 'create_paypal_order', token });
+  if (!response.orderId) {
+    throw new Error('PayPal order was not created.');
+  }
+  return { orderId: response.orderId };
+}
+
+export async function capturePayPalPayment(
+  token: string,
+  orderId: string
+): Promise<PublicInvoicePayload> {
+  const response = await invokeInvoicePublic({
+    action: 'capture_paypal_payment',
+    token,
+    orderId,
+  });
+  return normalizePublicPayload(response);
+}
+
 export async function confirmPublicPayment(token: string): Promise<{
   invoiceNumber: string;
   clientName: string;
@@ -161,6 +194,8 @@ export function publicClientToClient(
     recurringLineItems: [],
     recurringCalendarExclusions: [],
     address: normalized.address,
+    reminderIntervalDays: null,
+    lateReminderIntervalDays: null,
   };
 }
 
@@ -181,6 +216,10 @@ export function publicInvoiceToInvoice(
     status: invoice.status as Invoice['status'],
     publicToken: null,
     paidAt: null,
+    emailSendCount: 0,
+    lastEmailSentAt: null,
+    lastEmailSentKind: null,
+    ...emptyInvoiceReminderSettings(),
     createdAt: invoice.createdAt,
   };
 }

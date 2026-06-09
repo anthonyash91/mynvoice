@@ -1,4 +1,9 @@
-import { calculateTotal, formatCurrency, formatDateLong } from '@/lib/calculations';
+import {
+  calculateTotal,
+  formatCurrency,
+  formatDateLong,
+  formatDateTime,
+} from '@/lib/calculations';
 import { clientDisplayName } from '@/lib/client';
 import {
   DEFAULT_EMAIL_TEMPLATE_CSS,
@@ -11,7 +16,11 @@ import {
   publicInvoiceUrl,
   publicPaymentSentUrl,
 } from '@/lib/appUrl';
-import { formatPaymentDate } from '@/lib/invoice';
+import {
+  formatPaymentDate,
+  invoiceEmailSendCountForTemplate,
+  invoiceNextReminderDate,
+} from '@/lib/invoice';
 import type {
   Client,
   EmailTemplate,
@@ -34,7 +43,31 @@ export const EMAIL_TEMPLATE_VARIABLES = [
   { key: 'paymentSentLink', label: 'Payment has been sent link' },
   { key: 'confirmPaymentLink', label: 'Owner confirm payment link' },
   { key: 'paymentDate', label: 'Date marked paid' },
+  { key: 'emailSendCount', label: 'Emails sent (including this one)' },
+  { key: 'nextReminderDate', label: 'Next automatic reminder date' },
 ] as const;
+
+const EMAIL_KIND_SENT_LABELS: Record<EmailTemplateKind, string> = {
+  unpaid: 'Initial email',
+  reminder: 'Reminder email',
+  late: 'Late email',
+  payment_received: 'Payment received email',
+};
+
+export function emailKindSentLabel(kind: EmailTemplateKind): string {
+  return EMAIL_KIND_SENT_LABELS[kind];
+}
+
+export function invoiceEmailSentTooltip(
+  count: number,
+  sentAt: string | null,
+  kind: EmailTemplateKind | null
+): string {
+  if (count <= 0 || !sentAt) return '';
+  const when = formatDateTime(sentAt);
+  if (kind) return `Last sent ${when} — ${emailKindSentLabel(kind)}`;
+  return `Last sent ${when}`;
+}
 
 export const EMAIL_TEMPLATE_META: Record<
   EmailTemplateKind,
@@ -70,6 +103,8 @@ export const SAMPLE_EMAIL_TEMPLATE_CONTEXT: Record<string, string> = {
   total: '$1,240.00',
   businessName: 'Anthony Mercer',
   paymentDate: 'June 7, 2026',
+  emailSendCount: '2',
+  nextReminderDate: 'June 12, 2026',
   invoiceLink: '',
   paymentSentLink: '',
   confirmPaymentLink: '',
@@ -298,8 +333,10 @@ export function normalizeEmailTemplates(templates?: Partial<EmailTemplates> | nu
 export function buildEmailTemplateContext(
   invoice: Invoice,
   client: Client | null,
-  settings: Settings
+  settings: Settings,
+  options?: { forOutgoingEmail?: boolean }
 ): Record<string, string> {
+  const forOutgoingEmail = options?.forOutgoingEmail ?? true;
   const totals = calculateTotal(invoice.lineItems, invoice.taxEnabled, invoice.taxRate);
   const clientName = client ? clientDisplayName(client) : invoice.clientName;
   const dueDate = invoice.dueDate ? formatDateLong(invoice.dueDate) : '';
@@ -321,6 +358,15 @@ export function buildEmailTemplateContext(
     paymentSentLink,
     confirmPaymentLink: '',
     paymentDate: formatPaymentDate(invoice.paidAt),
+    emailSendCount: invoiceEmailSendCountForTemplate(invoice, forOutgoingEmail),
+    nextReminderDate: invoiceNextReminderDate(
+      invoice,
+      {
+        reminderIntervalDays: settings.reminderIntervalDays,
+        lateReminderIntervalDays: settings.lateReminderIntervalDays,
+      },
+      { forOutgoingEmail, client }
+    ),
   };
 }
 

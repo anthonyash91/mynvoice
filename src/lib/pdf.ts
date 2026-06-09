@@ -21,8 +21,8 @@ type JsPdfInstance = {
   save: (filename: string) => void;
 };
 
-async function captureInvoicePdf(): Promise<JsPdfInstance> {
-  const source = document.querySelector<HTMLElement>('.invoice-print');
+async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsPdfInstance> {
+  const source = document.querySelector<HTMLElement>(sourceSelector);
   if (!source) {
     throw new Error('Invoice preview is not ready. Try again in a moment.');
   }
@@ -94,8 +94,8 @@ async function captureInvoicePdf(): Promise<JsPdfInstance> {
   }
 }
 
-export async function generateInvoicePdfBlob(): Promise<Blob> {
-  const pdf = await captureInvoicePdf();
+export async function generateInvoicePdfBlob(sourceSelector?: string): Promise<Blob> {
+  const pdf = await captureInvoicePdf(sourceSelector);
   return pdf.output('blob');
 }
 
@@ -120,12 +120,15 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function generateInvoicePdfBase64(): Promise<string> {
-  const blob = await generateInvoicePdfBlob();
+export async function generateInvoicePdfBase64(sourceSelector?: string): Promise<string> {
+  const blob = await generateInvoicePdfBlob(sourceSelector);
   return blobToBase64(blob);
 }
 
-export async function downloadInvoicePdf(invoiceNumber: string): Promise<void> {
-  const pdf = await captureInvoicePdf();
+export async function downloadInvoicePdf(
+  invoiceNumber: string,
+  sourceSelector?: string
+): Promise<void> {
+  const pdf = await captureInvoicePdf(sourceSelector);
   pdf.save(`${invoiceNumber}.pdf`);
 }

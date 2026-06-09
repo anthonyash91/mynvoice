@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
+import { PayPalCheckout } from '@/components/PayPalCheckout';
 import { StatusLabel } from '@/components/StatusLabel';
 import { migrateEmailTemplates } from '@/lib/emailTemplates';
 import {
@@ -25,7 +26,19 @@ interface PublicInvoiceAppProps {
 
 function toSettings(payload: PublicInvoicePayload): Settings {
   return {
-    ...payload.settings,
+    businessName: payload.settings.businessName,
+    email: payload.settings.email,
+    businessAddress: payload.settings.businessAddress,
+    mailingAddress: payload.settings.mailingAddress,
+    paymentDetails: payload.settings.paymentDetails,
+    defaultTaxRate: payload.settings.defaultTaxRate,
+    defaultDueDays: payload.settings.defaultDueDays,
+    reminderIntervalDays: 5,
+    lateReminderIntervalDays: 3,
+    paypalClientId: payload.settings.paypal.clientId,
+    paypalClientSecret: '',
+    paypalSandbox: payload.settings.paypal.sandbox,
+    logo: payload.settings.logo,
     emailTemplates: migrateEmailTemplates(),
   };
 }
@@ -42,6 +55,7 @@ function PublicInvoicePage({
   const [data, setData] = useState(payload);
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
+  const [payError, setPayError] = useState<string | null>(null);
   const [marked, setMarked] = useState(
     paymentJustMarked || payload.invoice.status === 'payment_sent'
   );
@@ -50,7 +64,9 @@ function PublicInvoicePage({
   const client = publicClientToClient(data.client, data.invoice);
   const settings = toSettings(data);
   const status = resolveStatus(invoice);
-  const canMarkPaymentSent = status !== 'paid' && status !== 'payment_sent';
+  const canPayOnline = status !== 'paid' && status !== 'payment_sent';
+  const canMarkPaymentSent = canPayOnline;
+  const paypal = data.settings.paypal;
 
   const handleMarkPaymentSent = async () => {
     if (!token) return;
@@ -100,13 +116,42 @@ function PublicInvoicePage({
           </div>
         )}
 
+        {payError && (
+          <div className="mb-4 rounded border border-destructive/30 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+            {payError}
+          </div>
+        )}
+
+        {canPayOnline && paypal.enabled && paypal.clientId && (
+          <div className="mb-4 rounded border border-border bg-white px-4 py-4 shadow-sm">
+            <div className="mb-3 text-[12px] uppercase tracking-wider text-muted-foreground">
+              Pay with PayPal
+            </div>
+            <PayPalCheckout
+              token={token}
+              clientId={paypal.clientId}
+              onPaid={async () => {
+                setPayError(null);
+                const updated = await fetchPublicInvoice(token);
+                setData(updated);
+              }}
+              onError={(message) => setPayError(message)}
+            />
+          </div>
+        )}
+
         {canMarkPaymentSent && (
           <div className="mb-4">
+            {paypal.enabled && (
+              <p className="mb-2 text-[12px] text-muted-foreground">
+                Paying by bank transfer or another method?
+              </p>
+            )}
             <button
               type="button"
               onClick={handleMarkPaymentSent}
               disabled={marking}
-              className="h-9 rounded bg-primary px-4 text-[13px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              className="h-9 rounded border border-border bg-white px-4 text-[13px] font-medium text-foreground hover:bg-secondary disabled:opacity-50"
             >
               {marking ? 'Updating…' : 'Payment has been sent'}
             </button>

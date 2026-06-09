@@ -6,6 +6,7 @@ import type {
   Client,
   Invoice,
   InvoiceDraft,
+  InvoiceReminderSettings,
   Settings,
 } from '@/types';
 import { resolveSendTemplateKind } from '@/lib/email';
@@ -30,6 +31,7 @@ import {
   deleteCalendarEntryRow,
   markCalendarEntriesBilled,
   unbillCalendarEntriesForInvoice,
+  unbillCalendarEntryIds,
   deleteClientRow,
   deleteInvoiceRow,
   ensureInvoicePublicToken,
@@ -41,8 +43,12 @@ import {
   saveInvoice,
   updateClientRow,
   updateInvoiceStatusRow,
+  updateInvoiceReminderSettingsRow,
+  fetchEmailHistory,
+  recordInvoiceEmailSent,
   upsertSettings,
 } from '@/lib/database';
+import { publicInvoiceUrl } from '@/lib/appUrl';
 import { sendInvoiceWithPdf } from '@/lib/email';
 import { migrateEmailTemplates } from '@/lib/emailTemplates';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
@@ -62,6 +68,7 @@ const emptyData: AppData = {
   invoices: [],
   calendarEntries: [],
   recurringCalendarExclusions: [],
+  emailHistory: [],
   settings: {
     businessName: '',
     email: '',
@@ -70,6 +77,11 @@ const emptyData: AppData = {
     paymentDetails: '',
     defaultTaxRate: 0,
     defaultDueDays: 14,
+    reminderIntervalDays: 5,
+    lateReminderIntervalDays: 3,
+    paypalClientId: '',
+    paypalClientSecret: '',
+    paypalSandbox: true,
     logo: null,
     emailTemplates: migrateEmailTemplates(),
   },
@@ -77,18 +89,20 @@ const emptyData: AppData = {
 };
 
 export function useStore(user: User | null) {
+  const userId = user?.id ?? null;
   const [data, setData] = useState<AppData>(emptyData);
   const dataRef = useRef(data);
-  const [loading, setLoading] = useState(Boolean(user));
+  const hasLoadedRef = useRef(false);
+  const [loading, setLoading] = useState(Boolean(userId));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { background?: boolean }) => {
     if (!user) return;
-    setLoading(true);
+    if (!options?.background) setLoading(true);
     setError(null);
     try {
       let appData = await fetchAppData(user.id);
@@ -122,13 +136,29 @@ export function useStore(user: User | null) {
   }, [user]);
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
+      hasLoadedRef.current = false;
       setData(emptyData);
       setLoading(false);
       return;
     }
-    refresh();
-  }, [user, refresh]);
+
+    void refresh({ background: hasLoadedRef.current });
+    hasLoadedRef.current = true;
+  }, [userId, refresh]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh({ background: true });
+      }
+    };
+
+    document.addEventListener('visibilitychange', refreshOnVisible);
+    return () => document.removeEventListener('visibilitychange', refreshOnVisible);
+  }, [userId, refresh]);
 
   const updateSettings = useCallback(
     async (settings: Settings) => {
@@ -245,10 +275,113 @@ export function useStore(user: User | null) {
     [user, data.invoices]
   );
 
+  const updateInvoiceDraft = useCallback(
+    async (invoiceId: string, draft: InvoiceDraft) => {
+      if (!user) throw new Error('Not signed in');
+      const existing = data.invoices.find((inv) => inv.id === invoiceId);
+      if (!existing) throw new Error('Invoice not found');
+
+      const { invoice, newClient } = await saveInvoice(
+        user.id,
+        draft,
+        existing.status,
+        invoiceId,
+        existing.createdAt
+      );
+
+      const previousEntryIds = new Set(
+        existing.lineItems
+          .map((item) => item.sourceCalendarEntryId)
+          .filter((id): id is string => Boolean(id))
+      );
+      const nextEntryIds = draft.lineItems
+        .map((item) => item.sourceCalendarEntryId)
+        .filter((id): id is string => Boolean(id));
+      const nextEntryIdSet = new Set(nextEntryIds);
+      const removedEntryIds = [...previousEntryIds].filter((id) => !nextEntryIdSet.has(id));
+
+      const [unbilledEntries, billedEntries] = await Promise.all([
+        removedEntryIds.length > 0
+          ? unbillCalendarEntryIds(user.id, invoiceId, removedEntryIds)
+          : Promise.resolve([]),
+        nextEntryIds.length > 0
+          ? markCalendarEntriesBilled(user.id, nextEntryIds, invoice.id)
+          : Promise.resolve([]),
+      ]);
+
+      setData((prev) => {
+        const entryUpdates = new Map<string, CalendarEntry>();
+        for (const entry of [...unbilledEntries, ...billedEntries]) {
+          entryUpdates.set(entry.id, entry);
+        }
+        const clients =
+          newClient && !prev.clients.some((c) => c.id === newClient.id)
+            ? [...prev.clients, newClient]
+            : prev.clients;
+
+        return {
+          ...prev,
+          clients,
+          invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? invoice : inv)),
+          calendarEntries: prev.calendarEntries.map((entry) =>
+            entryUpdates.get(entry.id) ?? entry
+          ),
+        };
+      });
+
+      return invoice;
+    },
+    [user, data.invoices]
+  );
+
+  const visitPublicInvoice = useCallback(
+    async (invoiceId: string) => {
+      if (!user) throw new Error('Not signed in');
+
+      const snapshot = dataRef.current;
+      const existing = snapshot.invoices.find((inv) => inv.id === invoiceId);
+      if (!existing) throw new Error('Invoice not found');
+
+      const invoice = existing.publicToken
+        ? existing
+        : await ensureInvoicePublicToken(user.id, invoiceId);
+
+      if (!invoice.publicToken) {
+        throw new Error(
+          'This invoice does not have a public link yet. Run supabase/migrate-invoice-payment-flow.sql in Supabase.'
+        );
+      }
+
+      if (!existing.publicToken) {
+        setData((prev) => ({
+          ...prev,
+          invoices: prev.invoices.map((inv) =>
+            inv.id === invoiceId ? invoice : inv
+          ),
+        }));
+      }
+
+      window.open(publicInvoiceUrl(invoice.publicToken), '_blank', 'noopener,noreferrer');
+    },
+    [user]
+  );
+
   const updateInvoiceStatus = useCallback(
     async (invoiceId: string, status: Invoice['status']) => {
       if (!user) throw new Error('Not signed in');
       const updated = await updateInvoiceStatusRow(user.id, invoiceId, status);
+      setData((prev) => ({
+        ...prev,
+        invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? updated : inv)),
+      }));
+    },
+    [user]
+  );
+
+  const updateInvoiceReminderSettings = useCallback(
+    async (invoiceId: string, settings: InvoiceReminderSettings) => {
+      if (!user) throw new Error('Not signed in');
+      const updated = await updateInvoiceReminderSettingsRow(user.id, invoiceId, settings);
       setData((prev) => ({
         ...prev,
         invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? updated : inv)),
@@ -283,20 +416,28 @@ export function useStore(user: User | null) {
         templateKind
       );
 
-      setData((prev) => ({
-        ...prev,
-        invoices: prev.invoices.map((inv) =>
-          inv.id === invoiceId ? invoiceWithToken : inv
-        ),
-      }));
+      const trackedInvoice = await recordInvoiceEmailSent(user.id, invoiceId, templateKind);
+      const emailHistory = await fetchEmailHistory(user.id);
+
+      let finalInvoice = {
+        ...invoiceWithToken,
+        ...trackedInvoice,
+        publicToken: invoiceWithToken.publicToken ?? trackedInvoice.publicToken,
+      };
 
       if (invoiceWithToken.status === 'draft' && purpose === 'invoice') {
-        const updated = await updateInvoiceStatusRow(user.id, invoiceId, 'unpaid');
-        setData((prev) => ({
-          ...prev,
-          invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? updated : inv)),
-        }));
+        finalInvoice = await updateInvoiceStatusRow(user.id, invoiceId, 'unpaid');
+        finalInvoice = {
+          ...finalInvoice,
+          publicToken: invoiceWithToken.publicToken ?? finalInvoice.publicToken,
+        };
       }
+
+      setData((prev) => ({
+        ...prev,
+        invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? finalInvoice : inv)),
+        emailHistory,
+      }));
     },
     [user]
   );
@@ -498,8 +639,11 @@ export function useStore(user: User | null) {
     updateClient,
     deleteClient,
     saveInvoiceDraft,
+    updateInvoiceDraft,
     updateInvoiceStatus,
+    updateInvoiceReminderSettings,
     sendInvoice,
+    visitPublicInvoice,
     deleteInvoice,
     getClientInvoiceCount,
     addCalendarEntry,

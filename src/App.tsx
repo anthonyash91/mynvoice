@@ -10,6 +10,7 @@ import { InvoicesView } from '@/views/InvoicesView';
 import { ClientsView } from '@/views/ClientsView';
 import { SettingsView } from '@/views/SettingsView';
 import { TemplatesView } from '@/views/TemplatesView';
+import { HistoryView } from '@/views/HistoryView';
 import { CalendarView } from '@/views/CalendarView';
 import { CalendarDayPanel } from '@/components/CalendarDayPanel';
 import { LoginView } from '@/views/LoginView';
@@ -23,7 +24,8 @@ const PANEL_ANIMATION_MS = 220;
 
 function panelWidthKey(panel: Panel): string {
   if (panel.kind === 'invoice') return `invoice:${panel.id}`;
-  if (panel.kind === 'edit-client') return `edit-client:${panel.id}`;
+  if (panel.kind === 'edit-invoice') return `edit-invoice:${panel.id}`;
+  if (panel.kind === 'edit-client' || panel.kind === 'new-client') return 'clients';
   if (panel.kind === 'calendar-day') return `calendar-day:${panel.date}`;
   return panel.kind;
 }
@@ -58,8 +60,11 @@ function AppShell() {
     updateClient,
     deleteClient,
     saveInvoiceDraft,
+    updateInvoiceDraft,
     updateInvoiceStatus,
+    updateInvoiceReminderSettings,
     sendInvoice,
+    visitPublicInvoice,
     deleteInvoice,
     getClientInvoiceCount,
     addCalendarEntry,
@@ -106,11 +111,16 @@ function AppShell() {
   }, []);
 
   const goto = useCallback((next: View) => {
-    setActiveView(next);
     if (next === 'invoices' || next === 'calendar') {
+      setActiveView(next);
       setPanel(null);
-    } else if (next === 'clients') {
+      return;
+    }
+
+    if (next === 'clients') {
       setPanel({ kind: 'clients' });
+    } else if (next === 'history') {
+      setPanel({ kind: 'history' });
     } else if (next === 'settings') {
       setPanel({ kind: 'settings' });
     } else if (next === 'templates') {
@@ -119,12 +129,18 @@ function AppShell() {
   }, [setPanel]);
 
   const openInvoice = useCallback((id: string) => setPanel({ kind: 'invoice', id }), [setPanel]);
+  const openEditInvoice = useCallback(
+    (id: string) => setPanel({ kind: 'edit-invoice', id }),
+    [setPanel]
+  );
   const openClient = useCallback((id: string) => setPanel({ kind: 'edit-client', id }), [setPanel]);
   const openNewClient = useCallback(() => setPanel({ kind: 'new-client' }), [setPanel]);
   const openNewInvoice = useCallback(() => setPanel({ kind: 'new-invoice' }), [setPanel]);
 
   const panelInvoice =
-    panel?.kind === 'invoice' ? data.invoices.find((i) => i.id === panel.id) : undefined;
+    panel?.kind === 'invoice' || panel?.kind === 'edit-invoice'
+      ? data.invoices.find((i) => i.id === panel.id)
+      : undefined;
 
   const panelClient =
     panel?.kind === 'edit-client'
@@ -178,8 +194,26 @@ function AppShell() {
           ) : (
             <InvoicesView
               invoices={data.invoices}
+              clients={data.clients}
+              settings={data.settings}
+              reminderIntervalDays={data.settings.reminderIntervalDays}
+              lateReminderIntervalDays={data.settings.lateReminderIntervalDays}
               onOpenInvoice={openInvoice}
               onNewInvoice={openNewInvoice}
+              onEditInvoice={openEditInvoice}
+              onChangeInvoiceStatus={updateInvoiceStatus}
+              onSendInvoice={sendInvoice}
+              onVisitPublicInvoice={visitPublicInvoice}
+              onDeleteInvoice={async (id) => {
+                await deleteInvoice(id);
+                if (
+                  panel &&
+                  (panel.kind === 'invoice' || panel.kind === 'edit-invoice') &&
+                  panel.id === id
+                ) {
+                  setPanel(null);
+                }
+              }}
             />
           )}
         </main>
@@ -219,6 +253,13 @@ function AppShell() {
                 onClose={() => setPanel(null)}
               />
             )}
+            {panel.kind === 'history' && (
+              <HistoryView
+                entries={data.emailHistory}
+                onOpenInvoice={(id) => setPanel({ kind: 'invoice', id, from: 'history' })}
+                onClose={() => setPanel(null)}
+              />
+            )}
             {panel.kind === 'settings' && (
               <SettingsView
                 settings={data.settings}
@@ -239,14 +280,57 @@ function AppShell() {
                 client={invoiceClient}
                 settings={data.settings}
                 onClose={() => setPanel(null)}
+                onBack={
+                  panel.from === 'history' ? () => setPanel({ kind: 'history' }) : undefined
+                }
+                onEdit={() =>
+                  setPanel({
+                    kind: 'edit-invoice',
+                    id: panelInvoice.id,
+                    from: panel.from,
+                  })
+                }
+                onChangeStatus={(status) => updateInvoiceStatus(panelInvoice.id, status)}
                 onSendInvoice={(pdfBase64, purpose) =>
                   sendInvoice(panelInvoice.id, pdfBase64, purpose)
                 }
-                onMarkPaid={() => updateInvoiceStatus(panelInvoice.id, 'paid')}
+                onVisitPublicInvoice={() => visitPublicInvoice(panelInvoice.id)}
+                onUpdateReminderSettings={(settings) =>
+                  updateInvoiceReminderSettings(panelInvoice.id, settings)
+                }
                 onDelete={async () => {
                   await deleteInvoice(panelInvoice.id);
                   setPanel(null);
                 }}
+              />
+            )}
+            {panel.kind === 'edit-invoice' && panelInvoice && (
+              <NewInvoicePanel
+                clients={data.clients}
+                invoices={data.invoices}
+                calendarEntries={data.calendarEntries}
+                recurringCalendarExclusions={data.recurringCalendarExclusions}
+                settings={data.settings}
+                editingInvoice={panelInvoice}
+                onClose={() =>
+                  setPanel({
+                    kind: 'invoice',
+                    id: panelInvoice.id,
+                    from: panel.from,
+                  })
+                }
+                onSave={async () => {}}
+                onUpdate={async (draft) => {
+                  await updateInvoiceDraft(panelInvoice.id, draft);
+                  setPanel({
+                    kind: 'invoice',
+                    id: panelInvoice.id,
+                    from: panel.from,
+                  });
+                }}
+                onAddCalendarEntry={addCalendarEntry}
+                onUpdateCalendarEntry={updateCalendarEntry}
+                onDeleteCalendarEntry={deleteCalendarEntry}
               />
             )}
             {panel.kind === 'edit-client' && panelClient && (

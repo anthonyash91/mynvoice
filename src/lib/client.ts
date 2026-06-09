@@ -16,6 +16,8 @@ export function emptyClientDraft(): ClientDraft {
     recurringLineItems: [],
     recurringCalendarExclusions: [],
     address: '',
+    reminderIntervalDays: null,
+    lateReminderIntervalDays: null,
   };
 }
 
@@ -230,6 +232,11 @@ export function clientRateLines(
   return lines;
 }
 
+function normalizeOptionalInterval(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value) || value < 1) return null;
+  return Math.floor(value);
+}
+
 export function normalizeClientDraft(draft: ClientDraft): ClientDraft {
   return {
     ...draft,
@@ -237,6 +244,8 @@ export function normalizeClientDraft(draft: ClientDraft): ClientDraft {
     owner: draft.owner.trim(),
     primaryEmail: draft.primaryEmail.trim(),
     address: draft.address.trim(),
+    reminderIntervalDays: normalizeOptionalInterval(draft.reminderIntervalDays),
+    lateReminderIntervalDays: normalizeOptionalInterval(draft.lateReminderIntervalDays),
     additionalEmails: draft.additionalEmails.map((e) => e.trim()).filter(Boolean),
     additionalRates: draft.additionalRates
       .map((r) => ({ ...r, label: r.label.trim(), rate: Number(r.rate) || 0 }))

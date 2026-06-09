@@ -275,6 +275,102 @@ export function syncImportedLineItems(
   return manual.length > 0 ? [...merged, ...manual] : merged;
 }
 
+export function lineItemCalendarEntryIds(lineItems: LineItem[]): Set<string> {
+  return new Set(
+    lineItems
+      .map((item) => item.sourceCalendarEntryId)
+      .filter((id): id is string => Boolean(id))
+  );
+}
+
+export function isAddableCalendarEntryForInvoiceEdit(
+  entry: CalendarEntry,
+  editingInvoiceId?: string | null
+): boolean {
+  if (!entry.invoiceId) return true;
+  return Boolean(editingInvoiceId && entry.invoiceId === editingInvoiceId);
+}
+
+export function recurringInvoiceCalendarEntries(
+  calendarEntries: CalendarEntry[],
+  clientId: string,
+  issueDate: string,
+  excludedEntryIds: ReadonlySet<string> = new Set(),
+  editingInvoiceId?: string | null
+): CalendarEntry[] {
+  return calendarEntries
+    .filter((entry) => entry.clientId === clientId)
+    .filter((entry) => !excludedEntryIds.has(entry.id))
+    .filter((entry) => isAddableCalendarEntryForInvoiceEdit(entry, editingInvoiceId))
+    .filter(isRecurringCalendarEntry)
+    .filter(isInvoiceImportableCalendarEntry)
+    .filter((entry) => isEntryInInvoiceImportWindow(entry.date, issueDate))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function syncRecurringImportedLineItems(
+  prev: LineItem[],
+  calendarEntries: CalendarEntry[],
+  clientId: string,
+  issueDate: string,
+  excludedEntryIds: ReadonlySet<string> = new Set(),
+  editingInvoiceId?: string | null
+): LineItem[] {
+  const prunedPrev = pruneOrphanedImportedLineItems(prev, calendarEntries, clientId);
+  const recurringEntries = recurringInvoiceCalendarEntries(
+    calendarEntries,
+    clientId,
+    issueDate,
+    excludedEntryIds,
+    editingInvoiceId
+  );
+  const importedRecurring = calendarEntriesToLineItems(recurringEntries);
+
+  const kept = prunedPrev.filter((item) => {
+    if (!item.sourceCalendarEntryId) return true;
+    if (item.sourceRecurringLineItemId) return false;
+
+    const entry = calendarEntries.find(
+      (calendarEntry) => calendarEntry.id === item.sourceCalendarEntryId
+    );
+    return !entry || !isRecurringCalendarEntry(entry);
+  });
+
+  if (importedRecurring.length === 0) return kept;
+
+  const mergedRecurring = importedRecurring.map((item) => {
+    const existing = prunedPrev.find(
+      (lineItem) => lineItem.sourceCalendarEntryId === item.sourceCalendarEntryId
+    );
+    return existing ? { ...item, id: existing.id } : item;
+  });
+
+  return [...mergedRecurring, ...kept].sort((a, b) =>
+    (a.sourceDate ?? '').localeCompare(b.sourceDate ?? '')
+  );
+}
+
+export function addableCalendarEntriesForInvoice(
+  calendarEntries: CalendarEntry[],
+  clientId: string,
+  existingLineItems: LineItem[],
+  excludedEntryIds: ReadonlySet<string> = new Set(),
+  issueDate?: string,
+  editingInvoiceId?: string | null
+): CalendarEntry[] {
+  const onInvoice = lineItemCalendarEntryIds(existingLineItems);
+
+  return calendarEntries
+    .filter((entry) => entry.clientId === clientId)
+    .filter((entry) => !excludedEntryIds.has(entry.id))
+    .filter((entry) => isAddableCalendarEntryForInvoiceEdit(entry, editingInvoiceId))
+    .filter((entry) => !isRecurringCalendarEntry(entry))
+    .filter(isInvoiceImportableCalendarEntry)
+    .filter((entry) => !onInvoice.has(entry.id))
+    .filter((entry) => !issueDate || isEntryInInvoiceImportWindow(entry.date, issueDate))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 export function lineItemToCalendarEntry(
   entry: CalendarEntry,
   item: Pick<LineItem, 'description' | 'quantity' | 'rate' | 'entryType'>
