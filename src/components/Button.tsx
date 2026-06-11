@@ -35,6 +35,9 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: LucideIcon;
   iconPosition?: 'left' | 'right';
   loading?: boolean;
+  loadingLabel?: string;
+  saved?: boolean;
+  savedLabel?: string;
   children?: ReactNode;
 }
 
@@ -44,6 +47,9 @@ export function Button({
   icon: Icon,
   iconPosition = 'left',
   loading = false,
+  loadingLabel = 'Saving…',
+  saved = false,
+  savedLabel = 'Saved',
   disabled,
   className,
   children,
@@ -51,7 +57,8 @@ export function Button({
   ...props
 }: ButtonProps) {
   const isLink = variant === 'link';
-  const showIcon = Icon && !loading;
+  const showIcon = Icon && !loading && !saved;
+  const label = saved ? savedLabel : loading ? loadingLabel : children;
 
   return (
     <button
@@ -60,13 +67,15 @@ export function Button({
       className={cn(
         'inline-flex items-center justify-center gap-1 rounded disabled:opacity-50',
         !isLink && sizeClass[size],
-        variantClass[variant],
+        saved
+          ? 'border border-[rgba(52,199,89,0.28)] bg-[rgba(52,199,89,0.1)] text-[#34C759] font-medium hover:opacity-100'
+          : variantClass[variant],
         className
       )}
       {...props}
     >
       {showIcon && iconPosition === 'left' && <Icon className="h-3.5 w-3.5 shrink-0" />}
-      {children}
+      {label}
       {showIcon && iconPosition === 'right' && <Icon className="h-3.5 w-3.5 shrink-0" />}
     </button>
   );

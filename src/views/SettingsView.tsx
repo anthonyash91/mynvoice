@@ -2,7 +2,6 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { FormFooter } from '@/components/FormFooter';
-import { SaveFeedback } from '@/components/SaveFeedback';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Textarea } from '@/components/Textarea';
 import { TextInput } from '@/components/TextInput';
@@ -269,11 +268,10 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           </div>
         </Field>
 
-        <FormFooter className="items-center gap-3">
-          <Button variant="primary" onClick={save} disabled={saving} loading={saving}>
-            {saving ? 'Saving…' : 'Save'}
+        <FormFooter>
+          <Button variant="primary" onClick={save} disabled={saving} loading={saving} saved={saved}>
+            Save
           </Button>
-          <SaveFeedback visible={saved} />
         </FormFooter>
       </div>
     </div>

@@ -3,7 +3,6 @@ import { Button } from '@/components/Button';
 import { EmailTemplatePreview } from '@/components/EmailTemplatePreview';
 import { Field } from '@/components/Field';
 import { FormFooter } from '@/components/FormFooter';
-import { SaveFeedback } from '@/components/SaveFeedback';
 import { SectionHeader } from '@/components/SectionHeader';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { TextInput } from '@/components/TextInput';
@@ -153,13 +152,12 @@ export function TemplatesView({ settings, onSave, onClose }: TemplatesViewProps)
             </div>
 
             <FormFooter className="shrink-0 items-center gap-2 px-6 py-4">
-              <Button variant="primary" onClick={save} disabled={saving} loading={saving}>
-                {saving ? 'Saving…' : 'Save templates'}
+              <Button variant="primary" onClick={save} disabled={saving} loading={saving} saved={saved}>
+                Save templates
               </Button>
               <Button variant="ghost" onClick={resetActiveTemplate}>
                 Reset template
               </Button>
-              <SaveFeedback visible={saved} message="Saved" size="sm" />
               {saveError && <span className="text-[12px] text-destructive">{saveError}</span>}
             </FormFooter>
           </div>
