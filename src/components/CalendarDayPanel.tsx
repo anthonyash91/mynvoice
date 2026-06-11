@@ -8,7 +8,9 @@ import { HourlyRateCombobox } from '@/components/HourlyRateCombobox';
 import { LineItemTypeCombobox } from '@/components/LineItemTypeCombobox';
 import { LineItemTypeBadge } from '@/components/LineItemTypeBadge';
 import { lineItemKindFromCalendarEntry } from '@/lib/lineItem';
+import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
+import { FormFooter } from '@/components/FormFooter';
 import { PanelShell } from '@/components/PanelShell';
 import { TextInput } from '@/components/TextInput';
 import {
@@ -407,31 +409,26 @@ export function CalendarDayPanel({
                 <span className="font-medium tabular-nums">{formatCurrency(lineItemTotal)}</span>
               </div>
 
-              <div className="flex items-center justify-end gap-2 border-t border-border pt-[22px]">
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  disabled={saving}
-                  className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary disabled:opacity-50"
-                >
+              <FormFooter>
+                <Button onClick={handleCancel} disabled={saving}>
                   Cancel
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={saveEntry}
                   disabled={saving || !canSave}
-                  className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+                  loading={saving}
+                  icon={editingId ? undefined : Plus}
                 >
-                  {editingId ? (
-                    saving ? 'Saving…' : 'Save changes'
-                  ) : (
-                    <>
-                      <Plus className="h-3.5 w-3.5" />
-                      {saving ? 'Adding…' : 'Add entry'}
-                    </>
-                  )}
-                </button>
-              </div>
+                  {editingId
+                    ? saving
+                      ? 'Saving…'
+                      : 'Save changes'
+                    : saving
+                      ? 'Adding…'
+                      : 'Add entry'}
+                </Button>
+              </FormFooter>
             </>
           )}
         </div>

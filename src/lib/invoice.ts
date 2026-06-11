@@ -210,6 +210,13 @@ export function invoiceDueDisplay(
   invoice: Invoice,
   now = new Date()
 ): { label: string; tooltip: string } {
+  if (invoice.status === 'paid') {
+    return {
+      label: '—',
+      tooltip: 'Paid invoices no longer show a due countdown.',
+    };
+  }
+
   if (!invoice.dueDate) {
     return {
       label: '—',

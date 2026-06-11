@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { Button } from '@/components/Button';
+import { FormFooter } from '@/components/FormFooter';
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -59,24 +61,19 @@ export function ConfirmDialog({
         <p id="confirm-dialog-description" className="text-[13px] text-muted-foreground mt-2">
           {description}
         </p>
-        <div className="flex justify-end gap-2 mt-6">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={loading}
-            className="h-8 px-3 text-[13px] rounded hover:bg-secondary disabled:opacity-50"
-          >
+        <FormFooter bordered={false} className="mt-6">
+          <Button onClick={onCancel} disabled={loading}>
             {cancelLabel}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="destructiveFilled"
             onClick={onConfirm}
             disabled={loading}
-            className="h-8 px-3 text-[13px] bg-destructive text-destructive-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
+            loading={loading}
           >
             {loading ? 'Please wait…' : confirmLabel}
-          </button>
-        </div>
+          </Button>
+        </FormFooter>
       </div>
     </div>
   );

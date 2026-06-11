@@ -1,7 +1,8 @@
 import { applyPdfPageBreakAvoidance } from '@/lib/pdfPageBreaks';
 
 const INVOICE_PADDING = 40;
-const CAPTURE_SCALE = 2;
+const CAPTURE_SCALE = 1.5;
+const JPEG_QUALITY = 0.84;
 
 const PAGE_WIDTH_MM = 210;
 const PAGE_HEIGHT_MM = 297;
@@ -20,6 +21,25 @@ type JsPdfInstance = {
   output: (type: 'blob') => Blob;
   save: (filename: string) => void;
 };
+
+function sliceCanvas(
+  source: HTMLCanvasElement,
+  y: number,
+  height: number
+): HTMLCanvasElement {
+  const slice = document.createElement('canvas');
+  slice.width = source.width;
+  slice.height = height;
+  const ctx = slice.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to prepare PDF page.');
+  }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, slice.width, slice.height);
+  ctx.drawImage(source, 0, y, source.width, height, 0, 0, source.width, height);
+  return slice;
+}
 
 async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsPdfInstance> {
   const source = document.querySelector<HTMLElement>(sourceSelector);
@@ -69,23 +89,29 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
       },
     });
 
-    const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4') as unknown as JsPdfInstance;
+    const pageSliceHeightPx = Math.max(
+      1,
+      Math.round(canvas.width * (PAGE_HEIGHT_MM / PAGE_WIDTH_MM))
+    );
 
-    const imgWidthMm = PAGE_WIDTH_MM;
-    const imgHeightMm = (captureHeight / CAPTURE_WIDTH_PX) * PAGE_WIDTH_MM;
+    let offsetY = 0;
+    let pageIndex = 0;
 
-    let heightLeft = imgHeightMm;
-    let position = 0;
+    while (offsetY < canvas.height) {
+      if (pageIndex > 0) {
+        pdf.addPage();
+      }
 
-    pdf.addImage(imgData, 'PNG', 0, position, imgWidthMm, imgHeightMm);
-    heightLeft -= PAGE_HEIGHT_MM;
+      const sliceHeightPx = Math.min(pageSliceHeightPx, canvas.height - offsetY);
+      const slice = sliceCanvas(canvas, offsetY, sliceHeightPx);
+      const imgData = slice.toDataURL('image/jpeg', JPEG_QUALITY);
+      const sliceHeightMm = (sliceHeightPx / canvas.width) * PAGE_WIDTH_MM;
 
-    while (heightLeft >= 0) {
-      position = heightLeft - imgHeightMm;
-      pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidthMm, imgHeightMm);
-      heightLeft -= PAGE_HEIGHT_MM;
+      pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_WIDTH_MM, sliceHeightMm);
+
+      offsetY += sliceHeightPx;
+      pageIndex += 1;
     }
 
     return pdf;

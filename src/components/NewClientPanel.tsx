@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { Button } from '@/components/Button';
 import { ClientFormFields } from '@/components/ClientFormFields';
+import { FormFooter } from '@/components/FormFooter';
 import { PanelShell } from '@/components/PanelShell';
 import { emptyClientDraft, normalizeClientDraft } from '@/lib/client';
 import type { Client } from '@/types';
@@ -27,20 +29,14 @@ export function NewClientPanel({ onClose, onSave }: NewClientPanelProps) {
 
   return (
     <PanelShell title="New client" onClose={onClose} backArrow fillWidth>
-      <div className="w-full flex flex-col gap-4 px-6 pt-5 pb-6">
+      <div className="flex w-full flex-col gap-4 px-6 pt-5 pb-6">
         <ClientFormFields draft={draft} onChange={setDraft} />
-        <div className="border-t border-border pt-[22px] flex justify-end gap-2">
-          <button onClick={onClose} className="h-8 px-3 text-[13px] rounded hover:bg-secondary">
-            Cancel
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
-          >
+        <FormFooter>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={save} disabled={saving} loading={saving}>
             {saving ? 'Adding…' : 'Add'}
-          </button>
-        </div>
+          </Button>
+        </FormFooter>
       </div>
     </PanelShell>
   );

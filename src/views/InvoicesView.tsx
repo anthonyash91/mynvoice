@@ -1,4 +1,5 @@
 import { Send } from 'lucide-react';
+import { EmptyState } from '@/components/EmptyState';
 import { InvoiceActionsMenu } from '@/components/InvoiceActionsMenu';
 import { ViewHeader } from '@/components/ViewHeader';
 import { StatusLabel } from '@/components/StatusLabel';
@@ -6,6 +7,12 @@ import { Tooltip } from '@/components/Tooltip';
 import { calculateTotal, formatCurrency, formatDate } from '@/lib/calculations';
 import { invoiceEmailSentTooltip } from '@/lib/emailTemplates';
 import { invoiceDueDisplay, invoiceReminderDisplay, resolveStatus } from '@/lib/invoice';
+import {
+  tableRowHoverClass,
+  tableTdClass,
+  tableThClass,
+  tableTooltipCellClass,
+} from '@/lib/tableStyles';
 import { cn } from '@/lib/utils';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
 
@@ -27,10 +34,6 @@ interface InvoicesViewProps {
   onVisitPublicInvoice: (id: string) => Promise<void>;
   onDeleteInvoice: (id: string) => Promise<void>;
 }
-
-const thClass = 'text-left font-normal py-2.5 px-4 whitespace-nowrap';
-const tdClass = 'py-2.5 px-4 text-left max-w-0 whitespace-nowrap truncate';
-const tooltipCellClass = 'block min-w-0 max-w-full truncate';
 
 export function InvoicesView({
   invoices,
@@ -62,25 +65,27 @@ export function InvoicesView({
         </colgroup>
         <thead>
           <tr className="text-muted-foreground border-b border-border">
-            <th className={cn(thClass, 'pl-8')}>Client</th>
-            <th className={thClass}>Invoice</th>
-            <th className={thClass}>Date</th>
-            <th className={thClass}>Amount</th>
-            <th className={thClass}>Due</th>
-            <th className={thClass}>Sent</th>
-            <th className={thClass}>Reminder</th>
-            <th className={thClass}>Status</th>
-            <th className={cn(thClass, 'pr-8')}>Actions</th>
+            <th className={cn(tableThClass, 'pl-8')}>Client</th>
+            <th className={tableThClass}>Invoice</th>
+            <th className={tableThClass}>Date</th>
+            <th className={tableThClass}>Amount</th>
+            <th className={tableThClass}>Due</th>
+            <th className={tableThClass}>Sent</th>
+            <th className={tableThClass}>Reminder</th>
+            <th className={tableThClass}>Status</th>
+            <th className={cn(tableThClass, 'pr-8')}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={9} className="px-8 pt-4 pb-2.5 text-muted-foreground">
-                No invoices yet.{' '}
-                <button onClick={onNewInvoice} className="text-primary hover:underline">
-                  Create the first one.
-                </button>
+              <td colSpan={9}>
+                <EmptyState
+                  message="No invoices yet."
+                  action={{ label: 'Create the first one.', onClick: onNewInvoice }}
+                  padding="compact"
+                  className="px-8"
+                />
               </td>
             </tr>
           ) : (
@@ -129,41 +134,41 @@ export function InvoicesView({
                 <tr
                   key={inv.id}
                   onClick={() => onOpenInvoice(inv.id)}
-                  className="cursor-pointer border-b border-border hover:bg-secondary"
+                  className={tableRowHoverClass}
                 >
-                  <td className={cn(tdClass, 'pl-8')}>{inv.clientName}</td>
-                  <td className={cn(tdClass, 'font-mono text-muted-foreground')}>{inv.number}</td>
-                  <td className={cn(tdClass, 'text-muted-foreground')}>
+                  <td className={cn(tableTdClass, 'pl-8')}>{inv.clientName}</td>
+                  <td className={cn(tableTdClass, 'font-mono text-muted-foreground')}>{inv.number}</td>
+                  <td className={cn(tableTdClass, 'text-muted-foreground')}>
                     {formatDate(inv.issueDate)}
                   </td>
-                  <td className={cn(tdClass, 'tabular-nums font-semibold')}>
+                  <td className={cn(tableTdClass, 'tabular-nums font-semibold')}>
                     {formatCurrency(total)}
                   </td>
-                  <td className={cn(tdClass, 'tabular-nums text-muted-foreground')}>
-                    <Tooltip content={due.tooltip} className={tooltipCellClass}>
+                  <td className={cn(tableTdClass, 'tabular-nums text-muted-foreground')}>
+                    <Tooltip content={due.tooltip} className={tableTooltipCellClass}>
                       {dueLabel}
                     </Tooltip>
                   </td>
-                  <td className={cn(tdClass, 'text-muted-foreground')}>
+                  <td className={cn(tableTdClass, 'text-muted-foreground')}>
                     {sentTooltip ? (
-                      <Tooltip content={sentTooltip} className={tooltipCellClass}>
+                      <Tooltip content={sentTooltip} className={tableTooltipCellClass}>
                         {sentCount}
                       </Tooltip>
                     ) : (
                       sentCount
                     )}
                   </td>
-                  <td className={cn(tdClass, 'tabular-nums text-muted-foreground')}>
-                    <Tooltip content={reminder.tooltip} className={tooltipCellClass}>
+                  <td className={cn(tableTdClass, 'tabular-nums text-muted-foreground')}>
+                    <Tooltip content={reminder.tooltip} className={tableTooltipCellClass}>
                       {reminderLabel}
                     </Tooltip>
                   </td>
-                  <td className={tdClass}>
+                  <td className={tableTdClass}>
                     <span className="block truncate">
                       <StatusLabel status={status} />
                     </span>
                   </td>
-                  <td className={cn(tdClass, 'pr-8')}>
+                  <td className={cn(tableTdClass, 'pr-8')}>
                     <InvoiceActionsMenu
                       invoice={inv}
                       client={client}

@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { IconButton } from '@/components/IconButton';
 import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 
@@ -24,12 +25,7 @@ export function ViewHeader({
     >
       <div className="flex min-w-0 items-center gap-3">
         {onClose && (
-          <button
-            onClick={onClose}
-            className="inline-flex items-center justify-center shrink-0 text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <IconButton icon={X} size="md" aria-label="Close panel" onClick={onClose} />
         )}
         <h1 className="text-[15px] font-medium leading-none">{title}</h1>
         {subtitle && (

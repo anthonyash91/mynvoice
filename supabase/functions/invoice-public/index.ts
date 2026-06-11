@@ -12,8 +12,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const USER_SETTINGS_PUBLIC_SELECT =
-  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo, paypal_client_id, paypal_client_secret, paypal_sandbox';
+const USER_SETTINGS_BASE_SELECT =
+  'business_name, email, business_address, mailing_address, payment_details, default_tax_rate, default_due_days, logo';
+
+const USER_SETTINGS_PAYPAL_PUBLIC_SELECT =
+  `${USER_SETTINGS_BASE_SELECT}, paypal_client_id, paypal_sandbox`;
+
+const USER_SETTINGS_PAYPAL_SERVER_SELECT =
+  `${USER_SETTINGS_PAYPAL_PUBLIC_SELECT}, paypal_client_secret`;
 
 const INVOICE_PUBLIC_SELECT =
   'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, owner_confirm_token, created_at';
@@ -281,12 +287,69 @@ async function fetchClientForInvoice(
   return null;
 }
 
+function isMissingPayPalColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return (
+    message.includes('paypal_client_id') ||
+    message.includes('paypal_client_secret') ||
+    message.includes('paypal_sandbox')
+  );
+}
+
+function isMissingEmailTemplatesColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('email_templates') || message.includes('reminder_interval_days');
+}
+
+async function fetchUserSettingsForPublic(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  options: { includePayPalSecret?: boolean; includeEmailTemplates?: boolean } = {}
+): Promise<Record<string, unknown>> {
+  const extraColumns = [
+    options.includeEmailTemplates ? 'email_templates, reminder_interval_days' : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const withExtra = (base: string) => (extraColumns ? `${base}, ${extraColumns}` : base);
+
+  const attempts = options.includePayPalSecret
+    ? [
+        withExtra(USER_SETTINGS_PAYPAL_SERVER_SELECT),
+        withExtra(USER_SETTINGS_PAYPAL_PUBLIC_SELECT),
+        withExtra(USER_SETTINGS_BASE_SELECT),
+      ]
+    : [withExtra(USER_SETTINGS_PAYPAL_PUBLIC_SELECT), withExtra(USER_SETTINGS_BASE_SELECT)];
+
+  let lastError: { message?: string } | null = null;
+
+  for (const columns of attempts) {
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select(columns)
+      .eq('user_id', userId)
+      .single();
+
+    if (!error && data) {
+      return data as Record<string, unknown>;
+    }
+
+    lastError = error;
+    if (error && !isMissingPayPalColumnError(error) && !isMissingEmailTemplatesColumnError(error)) {
+      throw error;
+    }
+  }
+
+  if (lastError) throw lastError;
+  throw new Error('User settings not found.');
+}
+
 function publicPayPalConfig(settings: Record<string, unknown>) {
   const clientId = String(settings.paypal_client_id ?? '').trim();
-  const clientSecret = String(settings.paypal_client_secret ?? '').trim();
 
   return {
-    enabled: Boolean(clientId && clientSecret),
+    enabled: Boolean(clientId),
     clientId,
     sandbox: settings.paypal_sandbox !== false,
   };
@@ -496,16 +559,10 @@ Deno.serve(async (req) => {
       if (error) throw error;
       if (!invoice) return jsonResponse({ error: 'Invoice not found.' }, 404);
 
-      const [{ data: settings, error: settingsError }, client] = await Promise.all([
-        supabase
-          .from('user_settings')
-          .select(USER_SETTINGS_PUBLIC_SELECT)
-          .eq('user_id', invoice.user_id)
-          .single(),
+      const [settings, client] = await Promise.all([
+        fetchUserSettingsForPublic(supabase, String(invoice.user_id)),
         fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
       ]);
-
-      if (settingsError) throw settingsError;
 
       return jsonResponse({
         ok: true,
@@ -550,16 +607,10 @@ Deno.serve(async (req) => {
         invoice.owner_confirm_token = ownerConfirmToken;
       }
 
-      const [{ data: settings, error: settingsError }, client] = await Promise.all([
-        supabase
-          .from('user_settings')
-          .select(USER_SETTINGS_PUBLIC_SELECT)
-          .eq('user_id', invoice.user_id)
-          .single(),
+      const [settings, client] = await Promise.all([
+        fetchUserSettingsForPublic(supabase, String(invoice.user_id)),
         fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
       ]);
-
-      if (settingsError) throw settingsError;
 
       const ownerEmail = String(settings.email ?? '').trim();
       if (shouldNotifyOwner && ownerEmail && isValidEmail(ownerEmail)) {
@@ -590,6 +641,31 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === 'preview_confirm_payment') {
+      const { data: invoice, error } = await supabase
+        .from('invoices')
+        .select('user_id, client_id, client_name, number, status')
+        .eq('owner_confirm_token', token)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!invoice) return jsonResponse({ error: 'Confirmation link is invalid or expired.' }, 404);
+
+      const clientRow = await fetchClientForInvoice(
+        supabase,
+        String(invoice.user_id),
+        invoice.client_id as string | null
+      );
+
+      return jsonResponse({
+        ok: true,
+        invoiceNumber: String(invoice.number),
+        clientName: clientDisplayName(clientRow, String(invoice.client_name)),
+        status: String(invoice.status),
+        alreadyPaid: invoice.status === 'paid',
+      });
+    }
+
     if (action === 'confirm_payment') {
       if (!resendApiKey) {
         return jsonResponse({ error: 'RESEND_API_KEY is not configured.' }, 500);
@@ -615,16 +691,12 @@ Deno.serve(async (req) => {
         });
       }
 
-      const [{ data: settings, error: settingsError }, clientRow] = await Promise.all([
-        supabase
-          .from('user_settings')
-          .select(`${USER_SETTINGS_PUBLIC_SELECT}, email_templates, reminder_interval_days`)
-          .eq('user_id', invoice.user_id)
-          .single(),
+      const [settings, clientRow] = await Promise.all([
+        fetchUserSettingsForPublic(supabase, String(invoice.user_id), {
+          includeEmailTemplates: true,
+        }),
         fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
       ]);
-
-      if (settingsError) throw settingsError;
 
       await markInvoicePaidAndNotifyClient({
         supabase,
@@ -659,13 +731,9 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'This invoice is awaiting payment confirmation.' }, 400);
       }
 
-      const { data: settings, error: settingsError } = await supabase
-        .from('user_settings')
-        .select(USER_SETTINGS_PUBLIC_SELECT)
-        .eq('user_id', invoice.user_id)
-        .single();
-
-      if (settingsError) throw settingsError;
+      const settings = await fetchUserSettingsForPublic(supabase, String(invoice.user_id), {
+        includePayPalSecret: true,
+      });
 
       const credentials = paypalCredentials(settings);
       const total = invoiceTotal(invoice);
@@ -702,13 +770,7 @@ Deno.serve(async (req) => {
       if (!invoice) return jsonResponse({ error: 'Invoice not found.' }, 404);
 
       if (invoice.status === 'paid') {
-        const { data: settings, error: settingsError } = await supabase
-          .from('user_settings')
-          .select(USER_SETTINGS_PUBLIC_SELECT)
-          .eq('user_id', invoice.user_id)
-          .single();
-
-        if (settingsError) throw settingsError;
+        const settings = await fetchUserSettingsForPublic(supabase, String(invoice.user_id));
 
         const clientRow = await fetchClientForInvoice(
           supabase,
@@ -727,16 +789,13 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'This invoice is awaiting payment confirmation.' }, 400);
       }
 
-      const [{ data: settings, error: settingsError }, clientRow] = await Promise.all([
-        supabase
-          .from('user_settings')
-          .select(`${USER_SETTINGS_PUBLIC_SELECT}, email_templates, reminder_interval_days`)
-          .eq('user_id', invoice.user_id)
-          .single(),
+      const [settings, clientRow] = await Promise.all([
+        fetchUserSettingsForPublic(supabase, String(invoice.user_id), {
+          includePayPalSecret: true,
+          includeEmailTemplates: true,
+        }),
         fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
       ]);
-
-      if (settingsError) throw settingsError;
 
       const credentials = paypalCredentials(settings);
       const expectedTotal = invoiceTotal(invoice);

@@ -1,5 +1,6 @@
 import { ChevronLeft, X } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { IconButton } from '@/components/IconButton';
 import { cn } from '@/lib/utils';
 
 export function PanelShell({
@@ -25,19 +26,14 @@ export function PanelShell({
       <div className="flex h-14 w-full shrink-0 items-center justify-between overflow-hidden border-b border-border px-6">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {backArrow ? (
-            <button
+            <IconButton
+              icon={ChevronLeft}
+              size="md"
+              aria-label="Back"
               onClick={onClose}
-              className="inline-flex shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
+            />
           ) : (
-            <button
-              onClick={onClose}
-              className="inline-flex shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <IconButton icon={X} size="md" aria-label="Close panel" onClick={onClose} />
           )}
           <span className="min-w-0 truncate text-[15px] font-medium leading-none">{title}</span>
         </div>

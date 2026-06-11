@@ -1,6 +1,8 @@
+import { EmptyState } from '@/components/EmptyState';
 import { ViewHeader } from '@/components/ViewHeader';
 import { formatDateTime } from '@/lib/calculations';
 import { emailKindSentLabel } from '@/lib/emailTemplates';
+import { tableTdClass, tableThClass } from '@/lib/tableStyles';
 import { cn } from '@/lib/utils';
 import type { EmailHistoryEntry } from '@/types';
 
@@ -9,9 +11,6 @@ interface HistoryViewProps {
   onOpenInvoice: (id: string) => void;
   onClose: () => void;
 }
-
-const thClass = 'text-left font-normal py-2.5 px-4 whitespace-nowrap';
-const tdClass = 'py-2.5 px-4 text-left max-w-0 whitespace-nowrap truncate';
 
 export function HistoryView({ entries, onOpenInvoice, onClose }: HistoryViewProps) {
   const rows = [...entries].sort(
@@ -29,9 +28,10 @@ export function HistoryView({ entries, onOpenInvoice, onClose }: HistoryViewProp
 
       <div className="flex-1 overflow-auto">
         {rows.length === 0 ? (
-          <div className="px-6 pt-4 pb-2.5 text-[13px] text-muted-foreground">
-            No emails sent yet. Send an invoice to see it here.
-          </div>
+          <EmptyState
+            message="No emails sent yet. Send an invoice to see it here."
+            padding="compact"
+          />
         ) : (
           <table className="w-full table-fixed text-[13px]">
             <colgroup>
@@ -41,10 +41,10 @@ export function HistoryView({ entries, onOpenInvoice, onClose }: HistoryViewProp
             </colgroup>
             <thead>
               <tr className="text-muted-foreground border-b border-border">
-                <th className={cn(thClass, 'pl-6')}>Sent</th>
-                <th className={thClass}>Invoice</th>
-                <th className={thClass}>Client</th>
-                <th className={cn(thClass, 'pr-6')}>Type</th>
+                <th className={cn(tableThClass, 'pl-6')}>Sent</th>
+                <th className={tableThClass}>Invoice</th>
+                <th className={tableThClass}>Client</th>
+                <th className={cn(tableThClass, 'pr-6')}>Type</th>
               </tr>
             </thead>
             <tbody>
@@ -62,20 +62,22 @@ export function HistoryView({ entries, onOpenInvoice, onClose }: HistoryViewProp
                       entry.invoiceId && 'cursor-pointer hover:bg-secondary'
                     )}
                   >
-                    <td className={cn(tdClass, 'pl-6 text-muted-foreground tabular-nums')}>
+                    <td className={cn(tableTdClass, 'pl-6 text-muted-foreground tabular-nums')}>
                       {formatDateTime(entry.sentAt)}
                     </td>
                     <td
                       className={cn(
-                        tdClass,
+                        tableTdClass,
                         'font-mono',
                         entry.invoiceId ? 'text-foreground' : 'text-muted-foreground'
                       )}
                     >
                       {entry.invoiceNumber}
                     </td>
-                    <td className={cn(tdClass, 'text-muted-foreground')}>{entry.clientName}</td>
-                    <td className={cn(tdClass, 'pr-6 text-muted-foreground')}>
+                    <td className={cn(tableTdClass, 'text-muted-foreground')}>
+                      {entry.clientName}
+                    </td>
+                    <td className={cn(tableTdClass, 'pr-6 text-muted-foreground')}>
                       {emailKindSentLabel(entry.emailKind)}
                     </td>
                   </tr>

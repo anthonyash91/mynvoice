@@ -1152,7 +1152,7 @@ export async function recordInvoiceEmailSent(
   const nextCount = Number(current?.email_send_count ?? 0) + 1;
   const sentAt = new Date().toISOString();
 
-  let result = await supabase
+  const { error: updateError } = await supabase
     .from('invoices')
     .update({
       email_send_count: nextCount,
@@ -1160,34 +1160,27 @@ export async function recordInvoiceEmailSent(
       last_email_sent_kind: kind,
     })
     .eq('user_id', userId)
-    .eq('id', invoiceId)
-    .select(INVOICE_SELECT)
-    .single();
+    .eq('id', invoiceId);
 
-  if (result.error && isMissingPublicTokenColumnError(result.error)) {
-    result = await supabase
-      .from('invoices')
-      .select(INVOICE_SELECT_BASE)
-      .eq('user_id', userId)
-      .eq('id', invoiceId)
-      .single();
+  if (updateError) {
+    if (isMissingPublicTokenColumnError(updateError)) {
+      const fallback = await selectInvoicesForUser(userId, invoiceId);
+      if (fallback.error) throw fallback.error;
+      const row = (fallback.data ?? [])[0];
+      if (!row) throw new Error('Invoice not found');
+      return toInvoice(row as unknown as DbInvoice);
+    }
+    throw updateError;
   }
 
-  if (result.error) throw result.error;
-
-  return toInvoice(result.data);
+  return refetchInvoice(userId, invoiceId);
 }
 
 export async function ensureInvoicePublicToken(
   userId: string,
   invoiceId: string
 ): Promise<Invoice> {
-  let result = await supabase
-    .from('invoices')
-    .select(INVOICE_SELECT)
-    .eq('user_id', userId)
-    .eq('id', invoiceId)
-    .single();
+  let result = await selectInvoicesForUser(userId, invoiceId);
 
   if (result.error && isMissingPublicTokenColumnError(result.error)) {
     throw new Error(
@@ -1196,23 +1189,32 @@ export async function ensureInvoicePublicToken(
   }
 
   if (result.error) throw result.error;
-  const current = toInvoice(result.data);
 
+  const row = (result.data ?? [])[0];
+  if (!row) throw new Error('Invoice not found');
+
+  const current = toInvoice(row as unknown as DbInvoice);
   if (current.publicToken) {
     return current;
   }
 
   const publicToken = crypto.randomUUID();
-  let updateResult = await supabase
+  const { error: updateError } = await supabase
     .from('invoices')
     .update({ public_token: publicToken })
     .eq('user_id', userId)
-    .eq('id', invoiceId)
-    .select(INVOICE_SELECT)
-    .single();
+    .eq('id', invoiceId);
 
-  if (updateResult.error) throw updateResult.error;
-  return toInvoice(updateResult.data);
+  if (updateError) {
+    if (isMissingPublicTokenColumnError(updateError)) {
+      throw new Error(
+        'Run supabase/migrate-invoice-payment-flow.sql to enable public invoice payment links.'
+      );
+    }
+    throw updateError;
+  }
+
+  return refetchInvoice(userId, invoiceId);
 }
 
 export async function insertCalendarEntry(

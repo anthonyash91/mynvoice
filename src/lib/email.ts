@@ -4,6 +4,7 @@ import {
   normalizeEmailTemplates,
   renderEmailTemplate,
 } from '@/lib/emailTemplates';
+import { hasFunctionInvokeFailure, readFunctionInvokeError } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
 import type { Client, EmailTemplateKind, Invoice, Settings } from '@/types';
 
@@ -53,27 +54,45 @@ interface SendInvoiceEmailTracking {
 }
 
 interface SendInvoiceEmailInput {
+  invoiceId?: string;
   to: string[];
   from: string;
   subject: string;
   html: string;
-  pdfBase64: string;
+  pdfBase64?: string;
   filename: string;
   tracking?: SendInvoiceEmailTracking;
 }
 
-export async function sendInvoiceEmail(input: SendInvoiceEmailInput): Promise<void> {
-  const { data, error } = await supabase.functions.invoke('send-invoice', {
-    body: input,
-  });
+const MAX_INVOICE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
-  if (error) {
-    throw new Error(error.message || 'Failed to send invoice email.');
+export async function sendInvoiceEmail(input: SendInvoiceEmailInput): Promise<void> {
+  if (input.pdfBase64) {
+    const approxBytes = Math.ceil((input.pdfBase64.length * 3) / 4);
+    if (approxBytes > MAX_INVOICE_ATTACHMENT_BYTES) {
+      const sizeMb = (approxBytes / (1024 * 1024)).toFixed(1);
+      throw new Error(
+        `PDF attachment is too large (${sizeMb} MB). Try a shorter invoice or remove the logo, then send again.`
+      );
+    }
   }
 
-  if (data && typeof data === 'object' && 'error' in data) {
-    const message = (data as { error?: string }).error;
-    throw new Error(message || 'Failed to send invoice email.');
+  const { data, error, response } = await supabase.functions.invoke('send-invoice', {
+    body: {
+      ...input,
+      invoiceId: input.invoiceId ?? input.tracking?.invoiceId,
+      pdfBase64: input.pdfBase64?.trim() || undefined,
+    },
+  });
+
+  if (hasFunctionInvokeFailure(data, error)) {
+    const failureMessage = await readFunctionInvokeError(
+      data,
+      error,
+      'Failed to send invoice email.',
+      response
+    );
+    throw new Error(failureMessage);
   }
 }
 
@@ -81,7 +100,7 @@ export async function sendInvoiceWithPdf(
   invoice: Invoice,
   client: Client,
   settings: Settings,
-  pdfBase64: string,
+  pdfBase64: string | undefined,
   templateKind: EmailTemplateKind
 ): Promise<void> {
   const validationError = validateInvoiceEmail(client, settings);
@@ -107,11 +126,12 @@ export async function sendInvoiceWithPdf(
   const rendered = renderEmailTemplate(templates[templateKind], context);
 
   await sendInvoiceEmail({
+    invoiceId: invoice.id,
     to: invoiceEmailRecipients(client),
     from: invoiceEmailFrom(settings),
     subject: rendered.subject,
     html: rendered.html,
-    pdfBase64,
+    pdfBase64: pdfBase64?.trim() || undefined,
     filename: `${invoice.number}.pdf`,
     tracking: {
       invoiceId: invoice.id,

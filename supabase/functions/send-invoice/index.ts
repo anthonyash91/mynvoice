@@ -1,4 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { clientDisplayName } from '../_shared/edgeEmail.ts';
+import { generateInvoicePdfBase64 } from '../_shared/invoicePdf.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,6 +15,7 @@ interface SendInvoiceTracking {
 }
 
 interface SendInvoiceRequest {
+  invoiceId?: string;
   to?: string[];
   from?: string;
   subject?: string;
@@ -42,6 +45,110 @@ function extractEmailAddress(from: string): string | null {
 
   const trimmed = from.trim();
   return isValidEmail(trimmed) ? trimmed : null;
+}
+
+async function fetchClientForInvoice(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  clientId: string | null
+): Promise<Record<string, unknown> | null> {
+  if (!clientId) return null;
+
+  const renamed = await supabase
+    .from('clients')
+    .select('owner, company_name, primary_email, additional_emails, address')
+    .eq('id', clientId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!renamed.error && renamed.data) {
+    return renamed.data as Record<string, unknown>;
+  }
+
+  const legacy = await supabase
+    .from('clients')
+    .select('name, company, email, additional_emails, address')
+    .eq('id', clientId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!legacy.error && legacy.data) {
+    return legacy.data as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function normalizeClientForPdf(client: Record<string, unknown> | null) {
+  if (!client) return null;
+
+  if ('company_name' in client || 'owner' in client) {
+    return {
+      companyName: String(client.company_name ?? ''),
+      owner: String(client.owner ?? ''),
+      primaryEmail: String(client.primary_email ?? ''),
+      address: String(client.address ?? ''),
+    };
+  }
+
+  return {
+    companyName: String(client.company ?? ''),
+    owner: String(client.name ?? ''),
+    primaryEmail: String(client.email ?? ''),
+    address: String(client.address ?? ''),
+  };
+}
+
+async function buildInvoicePdfBase64(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  invoiceId: string
+): Promise<string> {
+  const { data: invoice, error } = await supabase
+    .from('invoices')
+    .select(
+      'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status'
+    )
+    .eq('id', invoiceId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !invoice) {
+    throw new Error('Invoice not found.');
+  }
+
+  const [{ data: settings, error: settingsError }, clientRow] = await Promise.all([
+    supabase
+      .from('user_settings')
+      .select('business_name, email, business_address, payment_details')
+      .eq('user_id', userId)
+      .single(),
+    fetchClientForInvoice(supabase, userId, invoice.client_id as string | null),
+  ]);
+
+  if (settingsError) throw settingsError;
+
+  return generateInvoicePdfBase64({
+    invoice: {
+      number: String(invoice.number),
+      issue_date: String(invoice.issue_date),
+      due_date: invoice.due_date as string | null | undefined,
+      line_items: (invoice.line_items as Array<Record<string, unknown>>) ?? [],
+      notes: invoice.notes as string | null | undefined,
+      tax_enabled: Boolean(invoice.tax_enabled),
+      tax_rate: Number(invoice.tax_rate ?? 0),
+      status: String(invoice.status),
+      client_name: String(invoice.client_name),
+    },
+    settings: {
+      business_name: settings.business_name as string | null | undefined,
+      email: settings.email as string | null | undefined,
+      business_address: settings.business_address as string | null | undefined,
+      payment_details: settings.payment_details as string | null | undefined,
+    },
+    client: normalizeClientForPdf(clientRow),
+    clientDisplayName: clientDisplayName(clientRow, String(invoice.client_name)),
+  });
 }
 
 Deno.serve(async (req) => {
@@ -88,8 +195,19 @@ Deno.serve(async (req) => {
     const from = body.from?.trim() ?? '';
     const subject = body.subject?.trim() ?? '';
     const html = body.html?.trim() ?? '';
-    const pdfBase64 = body.pdfBase64?.trim() ?? '';
     const filename = body.filename?.trim() || 'invoice.pdf';
+    const invoiceId = body.invoiceId?.trim() ?? body.tracking?.invoiceId?.trim() ?? '';
+
+    let pdfBase64 = body.pdfBase64?.trim() ?? '';
+    if (!pdfBase64 && invoiceId) {
+      try {
+        pdfBase64 = await buildInvoicePdfBase64(supabase, user.id, invoiceId);
+      } catch (pdfError) {
+        const message =
+          pdfError instanceof Error ? pdfError.message : 'Failed to generate invoice PDF.';
+        return jsonResponse({ error: message }, 500);
+      }
+    }
 
     if (to.length === 0) {
       return jsonResponse({ error: 'At least one recipient is required.' }, 400);

@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
+import { Button } from '@/components/Button';
+import { EmptyState } from '@/components/EmptyState';
+import { IconButton } from '@/components/IconButton';
 import { ViewHeader } from '@/components/ViewHeader';
 import { useConfirm } from '@/hooks/useConfirm';
 import { formatCurrency } from '@/lib/calculations';
@@ -58,17 +61,14 @@ export function ClientsView({
         title="Clients"
         subtitle={`${sorted.length} total`}
         action={
-          <button
-            onClick={onAddClient}
-            className="h-7 px-2.5 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium flex items-center gap-1 shrink-0"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add Client
-          </button>
+          <Button variant="primary" size="sm" icon={Plus} onClick={onAddClient} className="shrink-0">
+            Add Client
+          </Button>
         }
       />
       <div className="flex-1 overflow-auto">
         {sorted.length === 0 ? (
-          <div className="px-6 py-16 text-[13px] text-muted-foreground">No clients yet.</div>
+          <EmptyState message="No clients yet." />
         ) : (
           <table className="w-max text-[13px] border-collapse">
             <thead>
@@ -148,15 +148,13 @@ export function ClientsView({
                   </td>
                   <td className="w-full min-w-[50px] py-2.5" aria-hidden />
                   <td className="w-10 pr-6 py-2.5">
-                    <button
-                      type="button"
+                    <IconButton
+                      icon={Trash2}
+                      variant="destructive"
+                      aria-label={`Delete ${clientDisplayName(client)}`}
                       onClick={(e) => remove(client, e)}
                       disabled={deletingId === client.id}
-                      aria-label={`Delete ${clientDisplayName(client)}`}
-                      className="text-muted-foreground hover:text-destructive disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    />
                   </td>
                 </tr>
                 );

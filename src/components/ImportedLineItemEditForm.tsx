@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Button } from '@/components/Button';
+import { DateInput } from '@/components/DateInput';
 import { DurationInput } from '@/components/DurationInput';
+import { Field } from '@/components/Field';
+import { FormFooter } from '@/components/FormFooter';
 import { HourlyRateCombobox } from '@/components/HourlyRateCombobox';
+import { ReadOnlyValue } from '@/components/ReadOnlyValue';
 import { TextInput } from '@/components/TextInput';
 import {
   clientHourlyRateOptions,
@@ -16,26 +21,6 @@ interface ImportedLineItemEditFormProps {
   client: Client;
   onSave: (entry: CalendarEntry) => Promise<void>;
   onCancel: () => void;
-}
-
-function FormLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mb-1.5 text-[12px] uppercase leading-none tracking-wider text-muted-foreground">
-      {children}
-    </div>
-  );
-}
-
-function TotalInput({ value }: { value: string }) {
-  return (
-    <input
-      type="text"
-      readOnly
-      disabled
-      value={value}
-      className="h-8 w-full cursor-default rounded border border-border bg-background px-3 text-right text-[13px] tabular-nums outline-none disabled:opacity-100"
-    />
-  );
 }
 
 export function ImportedLineItemEditForm({
@@ -103,103 +88,80 @@ export function ImportedLineItemEditForm({
       <div className="min-w-0 space-y-3">
         {isFixed ? (
           <div className="grid min-w-0 grid-cols-[7.5rem_1fr_5.5rem] gap-2">
-            <div className="min-w-0">
-              <FormLabel>Date</FormLabel>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="h-8 w-full rounded border border-border bg-background px-2 text-[13px] tabular-nums outline-none focus:border-primary"
-              />
-            </div>
-            <div className="min-w-0">
-              <FormLabel>Description</FormLabel>
+            <Field label="Date">
+              <DateInput value={date} onChange={setDate} />
+            </Field>
+            <Field label="Description">
               <TextInput
                 value={description}
                 onChange={setDescription}
                 placeholder="Description"
               />
-            </div>
-            <div className="min-w-0">
-              <FormLabel>Amount</FormLabel>
+            </Field>
+            <Field label="Amount">
               <TextInput
                 type="number"
                 value={fixedAmount}
                 onChange={setFixedAmount}
                 placeholder="0"
               />
-            </div>
+            </Field>
           </div>
         ) : (
           <>
             <div className="grid min-w-0 grid-cols-[7.5rem_1fr] gap-2">
-              <div className="min-w-0">
-                <FormLabel>Date</FormLabel>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="h-8 w-full rounded border border-border bg-background px-2 text-[13px] tabular-nums outline-none focus:border-primary"
-                />
-              </div>
-              <div className="min-w-0">
-                <FormLabel>Description</FormLabel>
+              <Field label="Date">
+                <DateInput value={date} onChange={setDate} />
+              </Field>
+              <Field label="Description">
                 <TextInput
                   value={description}
                   onChange={setDescription}
                   placeholder="Description"
                 />
-              </div>
+              </Field>
             </div>
 
             {rateOptions.length > 0 && (
-              <div className="min-w-0">
-                <FormLabel>Hourly rate</FormLabel>
+              <Field label="Hourly rate">
                 <HourlyRateCombobox
                   options={rateOptions}
                   selectedId={selectedRateId}
                   onSelectedIdChange={setSelectedRateId}
                 />
-              </div>
+              </Field>
             )}
 
             <div className="grid min-w-0 grid-cols-[1fr_5.5rem_5.5rem] gap-2">
-              <div className="min-w-0">
-                <FormLabel>Time</FormLabel>
+              <Field label="Time">
                 <DurationInput quantity={duration} onChange={setDuration} />
-              </div>
-              <div className="min-w-0">
-                <FormLabel>Rate</FormLabel>
-                <div className="flex h-8 items-center justify-end rounded border border-border bg-background px-2 text-[13px] tabular-nums text-muted-foreground">
-                  {selectedRate ? formatCurrency(selectedRate.rate) : '—'}
-                </div>
-              </div>
-              <div className="min-w-0">
-                <FormLabel>Total</FormLabel>
-                <TotalInput value={formatCurrency(total)} />
-              </div>
+              </Field>
+              <Field label="Rate">
+                <ReadOnlyValue
+                  value={selectedRate ? formatCurrency(selectedRate.rate) : '—'}
+                  align="end"
+                />
+              </Field>
+              <Field label="Total">
+                <ReadOnlyValue value={formatCurrency(total)} align="end" />
+              </Field>
             </div>
           </>
         )}
       </div>
-      <div className="mt-3 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary disabled:opacity-50"
-        >
+      <FormFooter bordered={false} className="mt-3">
+        <Button onClick={onCancel} disabled={saving}>
           Cancel
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
           onClick={save}
           disabled={saving || !canSave}
-          className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
+          loading={saving}
         >
           {saving ? 'Saving…' : 'Save changes'}
-        </button>
-      </div>
+        </Button>
+      </FormFooter>
     </div>
   );
 }

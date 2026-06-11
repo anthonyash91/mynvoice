@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/Button';
 import { EmailTemplatePreview } from '@/components/EmailTemplatePreview';
 import { Field } from '@/components/Field';
+import { FormFooter } from '@/components/FormFooter';
+import { SaveFeedback } from '@/components/SaveFeedback';
+import { SectionHeader } from '@/components/SectionHeader';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { TextInput } from '@/components/TextInput';
 import { ViewHeader } from '@/components/ViewHeader';
 import {
@@ -10,7 +15,6 @@ import {
   migrateEmailTemplates,
   prepareEmailTemplatesForStorage,
 } from '@/lib/emailTemplates';
-import { cn } from '@/lib/utils';
 import type { EmailTemplateKind, EmailTemplates, Settings } from '@/types';
 
 const templateKinds: EmailTemplateKind[] = ['unpaid', 'reminder', 'late', 'payment_received'];
@@ -86,23 +90,14 @@ export function TemplatesView({ settings, onSave, onClose }: TemplatesViewProps)
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-border px-6 py-4">
-          <div className="flex rounded border border-border p-0.5">
-            {templateKinds.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => setActiveKind(kind)}
-                className={cn(
-                  'flex-1 h-7 text-[12px] rounded-sm transition-colors',
-                  activeKind === kind
-                    ? 'bg-secondary text-foreground font-medium'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {EMAIL_TEMPLATE_META[kind].label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            value={activeKind}
+            onChange={setActiveKind}
+            options={templateKinds.map((kind) => ({
+              value: kind,
+              label: EMAIL_TEMPLATE_META[kind].label,
+            }))}
+          />
           <p className="mt-3 text-[12px] leading-snug text-muted-foreground">
             {EMAIL_TEMPLATE_META[activeKind].description} Use CSS classes in HTML and style them in
             the CSS panel. Placeholders like{' '}
@@ -143,9 +138,7 @@ export function TemplatesView({ settings, onSave, onClose }: TemplatesViewProps)
               </Field>
 
               <div>
-                <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
-                  Variables
-                </div>
+                <SectionHeader title="Variables" />
                 <div className="flex flex-wrap gap-1.5">
                   {EMAIL_TEMPLATE_VARIABLES.map((variable) => (
                     <code
@@ -159,27 +152,16 @@ export function TemplatesView({ settings, onSave, onClose }: TemplatesViewProps)
               </div>
             </div>
 
-            <div className="shrink-0 flex items-center gap-2 border-t border-border px-6 py-4">
-              <button
-                type="button"
-                onClick={save}
-                disabled={saving}
-                className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
-              >
+            <FormFooter className="shrink-0 items-center gap-2 px-6 py-4">
+              <Button variant="primary" onClick={save} disabled={saving} loading={saving}>
                 {saving ? 'Saving…' : 'Save templates'}
-              </button>
-              <button
-                type="button"
-                onClick={resetActiveTemplate}
-                className="h-8 px-3 text-[13px] text-muted-foreground rounded hover:bg-secondary hover:text-foreground"
-              >
+              </Button>
+              <Button variant="ghost" onClick={resetActiveTemplate}>
                 Reset template
-              </button>
-              {saved && <span className="text-[12px] text-[#34C759]">Saved</span>}
-              {saveError && (
-                <span className="text-[12px] text-destructive">{saveError}</span>
-              )}
-            </div>
+              </Button>
+              <SaveFeedback visible={saved} message="Saved" size="sm" />
+              {saveError && <span className="text-[12px] text-destructive">{saveError}</span>}
+            </FormFooter>
           </div>
 
           <div className="flex min-h-0 flex-col bg-background">

@@ -1,17 +1,23 @@
 import { useEffect, useState } from 'react';
+import { Send } from 'lucide-react';
+import { Button } from '@/components/Button';
 import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
 import { PayPalCheckout } from '@/components/PayPalCheckout';
 import { StatusLabel } from '@/components/StatusLabel';
+import { cn } from '@/lib/utils';
 import { migrateEmailTemplates } from '@/lib/emailTemplates';
 import {
   confirmPublicPayment,
+  fetchConfirmPaymentPreview,
   fetchPublicInvoice,
   markPublicPaymentSent,
   mergePublicInvoicePayload,
   publicClientToClient,
   publicInvoiceToInvoice,
+  type ConfirmPaymentPreview,
   type PublicInvoicePayload,
 } from '@/lib/publicInvoice';
+import { formatUnknownError } from '@/lib/errors';
 import { resolveStatus } from '@/lib/invoice';
 import type { Settings } from '@/types';
 
@@ -47,10 +53,14 @@ function PublicInvoicePage({
   payload,
   token,
   paymentJustMarked,
+  promptPaymentSent = false,
+  loadError = null,
 }: {
   payload: PublicInvoicePayload;
   token: string;
   paymentJustMarked: boolean;
+  promptPaymentSent?: boolean;
+  loadError?: string | null;
 }) {
   const [data, setData] = useState(payload);
   const [marking, setMarking] = useState(false);
@@ -67,6 +77,7 @@ function PublicInvoicePage({
   const canPayOnline = status !== 'paid' && status !== 'payment_sent';
   const canMarkPaymentSent = canPayOnline;
   const paypal = data.settings.paypal;
+  const showPaymentSentPrompt = promptPaymentSent && canMarkPaymentSent && !marked;
 
   const handleMarkPaymentSent = async () => {
     if (!token) return;
@@ -84,6 +95,50 @@ function PublicInvoicePage({
     }
   };
 
+  const markPaymentSentSection = canMarkPaymentSent ? (
+    <div
+      className={cn(
+        'overflow-hidden rounded-xl border bg-white shadow-sm',
+        showPaymentSentPrompt ? 'border-[rgba(0,113,227,0.32)]' : 'border-border'
+      )}
+    >
+      {showPaymentSentPrompt && (
+        <div className="border-b border-[rgba(0,113,227,0.14)] bg-[rgba(0,113,227,0.07)] px-5 py-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#0071E3]">
+            Confirm your payment
+          </p>
+          <p className="mt-2 text-[16px] font-medium leading-snug text-foreground">
+            Let {settings.businessName} know your payment is on the way.
+          </p>
+          <p className="mt-2 text-[14px] leading-relaxed text-[#424245]">
+            Click the button below only after you have sent a bank transfer or completed payment
+            another way. They will confirm once the funds arrive.
+          </p>
+        </div>
+      )}
+
+      <div className={cn('px-5', showPaymentSentPrompt ? 'py-5' : 'py-4')}>
+        {!showPaymentSentPrompt && paypal.enabled && (
+          <p className="mb-3 text-[13px] leading-relaxed text-muted-foreground">
+            Paying by bank transfer or another method?
+          </p>
+        )}
+        <Button
+          variant={showPaymentSentPrompt ? 'primary' : 'outline'}
+          size="lg"
+          icon={Send}
+          loading={marking}
+          onClick={handleMarkPaymentSent}
+          className={cn(
+            showPaymentSentPrompt && 'h-12 w-full text-[15px] font-semibold shadow-sm'
+          )}
+        >
+          Payment has been sent
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="min-h-screen bg-[#f5f5f7]">
       <div className="mx-auto max-w-[860px] px-4 py-8">
@@ -96,6 +151,14 @@ function PublicInvoicePage({
           </div>
           <StatusLabel status={status} />
         </div>
+
+        {loadError && (
+          <div className="mb-4 rounded border border-destructive/30 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+            {loadError}
+          </div>
+        )}
+
+        {showPaymentSentPrompt && <div className="mb-5">{markPaymentSentSection}</div>}
 
         {(marked || status === 'payment_sent') && (
           <div className="mb-4 rounded border border-[rgba(255,149,0,0.22)] bg-[rgba(255,149,0,0.08)] px-4 py-3 text-[13px] text-foreground">
@@ -140,22 +203,8 @@ function PublicInvoicePage({
           </div>
         )}
 
-        {canMarkPaymentSent && (
-          <div className="mb-4">
-            {paypal.enabled && (
-              <p className="mb-2 text-[12px] text-muted-foreground">
-                Paying by bank transfer or another method?
-              </p>
-            )}
-            <button
-              type="button"
-              onClick={handleMarkPaymentSent}
-              disabled={marking}
-              className="h-9 rounded border border-border bg-white px-4 text-[13px] font-medium text-foreground hover:bg-secondary disabled:opacity-50"
-            >
-              {marking ? 'Updating…' : 'Payment has been sent'}
-            </button>
-          </div>
+        {!showPaymentSentPrompt && markPaymentSentSection && (
+          <div className="mb-4">{markPaymentSentSection}</div>
         )}
 
         <div className="rounded border border-border bg-white p-6 shadow-sm">
@@ -167,8 +216,10 @@ function PublicInvoicePage({
 }
 
 function ConfirmPaymentPage({ token }: { token: string }) {
-  const [loading, setLoading] = useState(true);
+  const [loadingPreview, setLoadingPreview] = useState(true);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ConfirmPaymentPreview | null>(null);
   const [result, setResult] = useState<{
     invoiceNumber: string;
     clientName: string;
@@ -180,14 +231,23 @@ function ConfirmPaymentPage({ token }: { token: string }) {
 
     (async () => {
       try {
-        const response = await confirmPublicPayment(token);
+        const response = await fetchConfirmPaymentPreview(token);
         if (cancelled) return;
-        setResult(response);
+
+        if (response.alreadyPaid) {
+          setResult({
+            invoiceNumber: response.invoiceNumber,
+            clientName: response.clientName,
+            alreadyPaid: true,
+          });
+        } else {
+          setPreview(response);
+        }
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to confirm payment.');
+        setError(formatUnknownError(err, 'Failed to load confirmation details.'));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadingPreview(false);
       }
     })();
 
@@ -196,11 +256,56 @@ function ConfirmPaymentPage({ token }: { token: string }) {
     };
   }, [token]);
 
+  const handleConfirm = async () => {
+    setConfirming(true);
+    setError(null);
+
+    try {
+      const response = await confirmPublicPayment(token);
+      setPreview(null);
+      setResult(response);
+    } catch (err) {
+      setError(formatUnknownError(err, 'Failed to confirm payment.'));
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f5f5f7] flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded border border-border bg-white p-8 shadow-sm">
-        {loading && <p className="text-[13px] text-muted-foreground">Confirming payment…</p>}
+        {loadingPreview && (
+          <p className="text-[13px] text-muted-foreground">Loading confirmation…</p>
+        )}
+
         {error && <p className="text-[13px] text-destructive">{error}</p>}
+
+        {preview && !result && (
+          <div className="space-y-4">
+            <div>
+              <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
+                Confirm payment
+              </div>
+              <h1 className="mt-2 text-[20px] font-medium text-foreground">
+                Invoice {preview.invoiceNumber}
+              </h1>
+              <p className="mt-1 text-[13px] text-muted-foreground">Client: {preview.clientName}</p>
+            </div>
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              The client marked payment as sent. Confirm only after you have received the funds.
+              This will mark the invoice as paid and notify the client.
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={confirming}
+              className="h-9 w-full rounded border border-border bg-foreground px-4 text-[13px] font-medium text-background hover:opacity-90 disabled:opacity-50"
+            >
+              {confirming ? 'Confirming…' : 'Confirm payment received'}
+            </button>
+          </div>
+        )}
+
         {result && (
           <div className="space-y-3">
             <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
@@ -235,29 +340,10 @@ export function PublicInvoiceApp({ route }: PublicInvoiceAppProps) {
       try {
         const initial = await fetchPublicInvoice(route.token);
         if (cancelled) return;
-
-        if (route.kind === 'payment-sent' && initial.invoice.status !== 'paid') {
-          try {
-            const updated = await markPublicPaymentSent(route.token);
-            if (!cancelled) setPayload(mergePublicInvoicePayload(initial, updated));
-            return;
-          } catch (markErr) {
-            if (!cancelled) {
-              setPayload(initial);
-              setError(
-                markErr instanceof Error
-                  ? markErr.message
-                  : 'Failed to record payment. You can try again below.'
-              );
-            }
-            return;
-          }
-        }
-
         setPayload(initial);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Invoice not found.');
+          setError(formatUnknownError(err, 'Invoice not found.'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -303,7 +389,9 @@ export function PublicInvoiceApp({ route }: PublicInvoiceAppProps) {
     <PublicInvoicePage
       payload={payload}
       token={route.token}
-      paymentJustMarked={route.kind === 'payment-sent'}
+      paymentJustMarked={false}
+      promptPaymentSent={route.kind === 'payment-sent'}
+      loadError={error}
     />
   );
 }

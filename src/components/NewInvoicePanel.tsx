@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useConfirm } from '@/hooks/useConfirm';
+import { Button } from '@/components/Button';
 import { ClientCombobox } from '@/components/ClientCombobox';
+import { DateInput } from '@/components/DateInput';
+import { EmptyState } from '@/components/EmptyState';
 import { Field } from '@/components/Field';
+import { FormFooter } from '@/components/FormFooter';
+import { IconButton } from '@/components/IconButton';
+import { SectionHeader } from '@/components/SectionHeader';
+import { Textarea } from '@/components/Textarea';
 import { Tooltip } from '@/components/Tooltip';
 import { Switch } from '@/components/ui/switch';
 import type {
@@ -451,13 +458,14 @@ export function NewInvoicePanel({
     <div className="inline-flex flex-col h-full max-w-full">
       <div className="flex h-14 w-full shrink-0 items-center justify-between overflow-hidden border-b border-border px-6 no-print">
         <div className="flex h-full min-w-0 flex-1 items-center gap-3">
-          <button
-            onClick={onClose}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+          <IconButton
+            icon={X}
+            size="md"
+            variant="ghost"
             aria-label="Close panel"
-          >
-            <X className="h-4 w-4" />
-          </button>
+            onClick={onClose}
+            className="h-7 w-7 rounded"
+          />
           <span className="inline-flex h-7 shrink-0 items-center text-[15px] font-medium leading-none">
             {isEditMode ? 'Edit invoice' : 'New invoice'}
           </span>
@@ -481,12 +489,7 @@ export function NewInvoicePanel({
 
         <div className="grid grid-cols-3 gap-4">
           <Field label="Issue date">
-            <input
-              type="date"
-              value={issueDate}
-              onChange={(e) => setIssueDate(e.target.value)}
-              className="w-full h-8 px-3 text-[13px] border border-border rounded bg-background outline-none focus:border-primary"
-            />
+            <DateInput value={issueDate} onChange={setIssueDate} />
           </Field>
           <Field label="Due date">
             <div className="flex h-8 items-center gap-2 border border-border rounded bg-background px-2 focus-within:border-primary">
@@ -524,24 +527,24 @@ export function NewInvoicePanel({
           {resolvedClientId && (
             <div className="mb-5 space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
-                  Add from calendar
-                </div>
+                <SectionHeader title="Add from calendar" compact />
                 {addableCalendarEntries.length > 1 && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="link"
+                    size="sm"
                     onClick={addAllCalendarEntriesToInvoice}
-                    className="text-[12px] text-primary hover:underline"
+                    className="h-auto px-0 py-0 text-[12px]"
                   >
                     Add all
-                  </button>
+                  </Button>
                 )}
               </div>
               {addableCalendarEntries.length === 0 ? (
-                <p className="text-[13px] text-muted-foreground">
-                  No unbilled calendar entries are available for this client in the current or
-                  prior billing month.
-                </p>
+                <EmptyState
+                  message="No unbilled calendar entries are available for this client in the current or prior billing month."
+                  padding="compact"
+                  className="px-0 py-0"
+                />
               ) : (
                 <div className="rounded border border-border divide-y divide-border">
                   {addableCalendarEntries.map((entry) => {
@@ -605,11 +608,9 @@ export function NewInvoicePanel({
             </div>
           )}
 
-          <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
-            Line items
-          </div>
+          <SectionHeader title="Line items" />
           {visibleLineItems.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">No line items to show.</p>
+            <EmptyState message="No line items to show." padding="compact" className="px-0 py-0" />
           ) : (
             <div className="min-w-0 rounded border border-border">
               <div
@@ -705,14 +706,13 @@ export function NewInvoicePanel({
                         </>
                       )}
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => removeLineItem(item)}
-                          className="rounded py-0.5 pl-0.5 pr-3 text-muted-foreground hover:text-destructive"
+                        <IconButton
+                          icon={Trash2}
+                          variant="destructive"
                           aria-label="Remove line item"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                          onClick={() => removeLineItem(item)}
+                          className="pr-3"
+                        />
                       </div>
                     </div>
                   )}
@@ -721,24 +721,24 @@ export function NewInvoicePanel({
               })}
             </div>
           )}
-          <button
-            type="button"
+          <Button
+            variant="link"
+            size="sm"
+            icon={Plus}
             onClick={addFixedItem}
             disabled={!resolvedClientId || addingFixedItem}
-            className="mt-2 flex items-center gap-1 text-[13px] text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-2 h-auto px-0 py-0"
           >
-            <Plus className="h-3 w-3" />
             {addingFixedItem ? 'Adding…' : 'Add fixed item'}
-          </button>
+          </Button>
         </div>
 
         <Field label="Notes (optional)">
-          <textarea
+          <Textarea
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={setNotes}
             placeholder="Payment terms, a thank-you, anything else."
             rows={3}
-            className="w-full px-3 py-2 text-[13px] border border-border rounded bg-background outline-none focus:border-primary resize-none"
           />
         </Field>
 
@@ -779,34 +779,27 @@ export function NewInvoicePanel({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-border pt-[22px]">
+        <FormFooter>
           {isEditMode ? (
-            <button
-              onClick={handleUpdate}
-              disabled={saving}
-              className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
-            >
+            <Button variant="primary" onClick={handleUpdate} disabled={saving} loading={saving}>
               {saving ? 'Saving…' : 'Save changes'}
-            </button>
+            </Button>
           ) : (
             <>
-              <button
-                onClick={() => handleSave('draft')}
-                disabled={saving}
-                className="h-8 px-3 text-[13px] text-foreground rounded hover:bg-secondary disabled:opacity-50"
-              >
+              <Button onClick={() => handleSave('draft')} disabled={saving} loading={saving}>
                 {saving ? 'Saving…' : 'Save as Draft'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => handleSave('unpaid')}
                 disabled={saving}
-                className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
+                loading={saving}
               >
                 {saving ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </>
           )}
-        </div>
+        </FormFooter>
       </div>
     </div>
   );

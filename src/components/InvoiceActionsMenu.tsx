@@ -23,8 +23,9 @@ import { useConfirm } from '@/hooks/useConfirm';
 import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
 import { StatusIcon } from '@/components/StatusLabel';
 import { invoiceEmailRecipients, validateInvoiceEmail } from '@/lib/email';
+import { formatUnknownError } from '@/lib/errors';
 import { INVOICE_STORED_STATUSES, resolveStatus, statusLabel } from '@/lib/invoice';
-import { downloadInvoicePdf, generateInvoicePdfBase64 } from '@/lib/pdf';
+import { downloadInvoicePdf } from '@/lib/pdf';
 import { cn } from '@/lib/utils';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
 
@@ -50,8 +51,7 @@ interface InvoiceActionsMenuProps {
 }
 
 function getErrorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  return 'Failed to send invoice.';
+  return formatUnknownError(err, 'Failed to send invoice.');
 }
 
 function MenuSeparator() {
@@ -204,9 +204,7 @@ export function InvoiceActionsMenu({
     setSentAction(null);
 
     try {
-      await activatePdfCapture();
-      const pdfBase64 = await generateInvoicePdfBase64(pdfSelector);
-      await onSendInvoice(pdfBase64, purpose);
+      await onSendInvoice('', purpose);
       setSentAction(purpose);
       if (sentTimeoutRef.current) clearTimeout(sentTimeoutRef.current);
       sentTimeoutRef.current = setTimeout(() => setSentAction(null), 3000);

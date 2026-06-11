@@ -1,6 +1,10 @@
 import { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
+import { AddLink } from '@/components/AddLink';
 import { Field } from '@/components/Field';
+import { IconButton } from '@/components/IconButton';
+import { SectionHeader } from '@/components/SectionHeader';
+import { Textarea } from '@/components/Textarea';
 import { TextInput } from '@/components/TextInput';
 import { useConfirm } from '@/hooks/useConfirm';
 import { formatCurrency } from '@/lib/calculations';
@@ -9,18 +13,6 @@ import { emptyClientRate, emptyRecurringLineItem, type ClientDraft } from '@/lib
 interface ClientFormFieldsProps {
   draft: ClientDraft;
   onChange: (draft: ClientDraft) => void;
-}
-
-function AddLink({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-[13px] text-muted-foreground hover:text-foreground flex items-center gap-1"
-    >
-      <Plus className="h-3.5 w-3.5" /> {label}
-    </button>
-  );
 }
 
 export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
@@ -121,9 +113,7 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
 
       {showAdditionalEmails ? (
         <div>
-          <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
-            Additional emails
-          </div>
+          <SectionHeader title="Additional emails" />
           <div className="space-y-2">
             {draft.additionalEmails.map((email, index) => (
               <div key={index} className="flex gap-2">
@@ -137,13 +127,12 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
                   }}
                   placeholder="billing@company.com"
                 />
-                <button
-                  type="button"
+                <IconButton
+                  icon={Trash2}
+                  variant="destructive"
+                  aria-label="Remove email"
                   onClick={() => removeEmail(index)}
-                  className="text-muted-foreground hover:text-destructive shrink-0 px-1"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                />
               </div>
             ))}
             <AddLink
@@ -173,9 +162,7 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
 
       {showAdditionalRates ? (
         <div>
-          <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
-            Additional rates
-          </div>
+          <SectionHeader title="Additional rates" />
           <div className="space-y-2">
             {draft.additionalRates.map((rate) => (
               <div key={rate.id} className="flex gap-2 items-center">
@@ -202,13 +189,12 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
                   }
                   placeholder="200"
                 />
-                <button
-                  type="button"
+                <IconButton
+                  icon={Trash2}
+                  variant="destructive"
+                  aria-label="Remove rate"
                   onClick={() => removeRate(rate.id)}
-                  className="text-muted-foreground hover:text-destructive shrink-0 px-1"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                />
               </div>
             ))}
             <AddLink
@@ -231,12 +217,10 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
 
       {showRecurringLineItems ? (
         <div>
-          <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
-            Recurring line items
-          </div>
-          <p className="mb-2 text-[12px] leading-snug text-muted-foreground">
-            Added automatically to new invoices once per month on the chosen day.
-          </p>
+          <SectionHeader
+            title="Recurring line items"
+            description="Added automatically to new invoices once per month on the chosen day."
+          />
           <div className="space-y-2">
             {draft.recurringLineItems.map((item) => (
               <div
@@ -291,13 +275,12 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
                   }
                   placeholder="Amount"
                 />
-                <button
-                  type="button"
+                <IconButton
+                  icon={Trash2}
+                  variant="destructive"
+                  aria-label="Remove recurring line item"
                   onClick={() => removeRecurringLineItem(item.id)}
-                  className="text-muted-foreground hover:text-destructive shrink-0 px-1"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                />
               </div>
             ))}
             <AddLink
@@ -324,22 +307,19 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
       )}
 
       <Field label="Address">
-        <textarea
+        <Textarea
           value={draft.address}
-          onChange={(e) => set({ address: e.target.value })}
+          onChange={(address) => set({ address })}
           rows={3}
           placeholder="Street, city, state, zip"
-          className="w-full px-3 py-2 text-[13px] border border-border rounded bg-background outline-none focus:border-primary resize-none"
         />
       </Field>
 
       <div>
-        <div className="text-[12px] uppercase tracking-wider text-muted-foreground mb-2">
-          Reminder intervals
-        </div>
-        <p className="mb-3 text-[12px] leading-snug text-muted-foreground">
-          Optional overrides for this client. Leave blank to use your global Settings intervals.
-        </p>
+        <SectionHeader
+          title="Reminder intervals"
+          description="Optional overrides for this client. Leave blank to use your global Settings intervals."
+        />
         <div className="grid grid-cols-2 gap-4">
           <Field label="Payment reminder (days)">
             <TextInput

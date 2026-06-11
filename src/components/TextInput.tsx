@@ -3,6 +3,7 @@ interface TextInputProps {
   onChange: (value: string) => void;
   type?: string;
   placeholder?: string;
+  disabled?: boolean;
 }
 
 export function TextInput({
@@ -10,6 +11,7 @@ export function TextInput({
   onChange,
   type = 'text',
   placeholder,
+  disabled,
 }: TextInputProps) {
   return (
     <input
@@ -17,7 +19,8 @@ export function TextInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full h-8 px-3 text-[13px] border border-border rounded bg-background outline-none focus:border-primary"
+      disabled={disabled}
+      className="w-full h-8 px-3 text-[13px] border border-border rounded bg-background outline-none focus:border-primary disabled:opacity-50"
     />
   );
 }

@@ -1,3 +1,4 @@
+import { hasFunctionInvokeFailure, readFunctionInvokeError } from '@/lib/errors';
 import { emptyInvoiceReminderSettings } from '@/lib/invoice';
 import { supabase } from '@/lib/supabase';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
@@ -40,6 +41,7 @@ interface PublicInvoiceResponse {
   alreadyPaid?: boolean;
   invoiceNumber?: string;
   clientName?: string;
+  status?: string;
   orderId?: string;
   error?: string;
 }
@@ -47,18 +49,19 @@ interface PublicInvoiceResponse {
 async function invokeInvoicePublic(
   body: Record<string, string>
 ): Promise<PublicInvoiceResponse> {
-  const { data, error } = await supabase.functions.invoke('invoice-public', { body });
+  const { data, error, response } = await supabase.functions.invoke('invoice-public', { body });
 
-  if (error) {
-    throw new Error(error.message || 'Failed to reach the invoice service.');
+  if (hasFunctionInvokeFailure(data, error)) {
+    const failureMessage = await readFunctionInvokeError(
+      data,
+      error,
+      'Failed to reach the invoice service.',
+      response
+    );
+    throw new Error(failureMessage);
   }
 
-  const response = data as PublicInvoiceResponse;
-  if (response?.error) {
-    throw new Error(response.error);
-  }
-
-  return response;
+  return data as PublicInvoiceResponse;
 }
 
 function normalizePublicClient(
@@ -162,6 +165,23 @@ export async function capturePayPalPayment(
     orderId,
   });
   return normalizePublicPayload(response);
+}
+
+export interface ConfirmPaymentPreview {
+  invoiceNumber: string;
+  clientName: string;
+  status: string;
+  alreadyPaid: boolean;
+}
+
+export async function fetchConfirmPaymentPreview(token: string): Promise<ConfirmPaymentPreview> {
+  const response = await invokeInvoicePublic({ action: 'preview_confirm_payment', token });
+  return {
+    invoiceNumber: response.invoiceNumber ?? '',
+    clientName: response.clientName ?? '',
+    status: response.status ?? '',
+    alreadyPaid: Boolean(response.alreadyPaid),
+  };
 }
 
 export async function confirmPublicPayment(token: string): Promise<{

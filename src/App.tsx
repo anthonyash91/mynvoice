@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { AppPanel } from '@/components/AppPanel';
+import { Button } from '@/components/Button';
 import { Sidebar } from '@/components/Sidebar';
 import { InvoicePanel } from '@/components/InvoicePanel';
 import { EditClientPanel } from '@/components/EditClientPanel';
@@ -163,12 +164,9 @@ function AppShell() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-6 gap-4">
         <div className="text-[13px] text-destructive max-w-md text-center">{error}</div>
-        <button
-          onClick={() => refresh()}
-          className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium"
-        >
+        <Button variant="primary" onClick={() => refresh()}>
           Retry
-        </button>
+        </Button>
       </div>
     );
   }

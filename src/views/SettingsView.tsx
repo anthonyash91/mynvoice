@@ -1,9 +1,13 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
-import { useConfirm } from '@/hooks/useConfirm';
+import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
+import { FormFooter } from '@/components/FormFooter';
+import { SaveFeedback } from '@/components/SaveFeedback';
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { Textarea } from '@/components/Textarea';
 import { TextInput } from '@/components/TextInput';
 import { ViewHeader } from '@/components/ViewHeader';
-import { cn } from '@/lib/utils';
+import { useConfirm } from '@/hooks/useConfirm';
 import type { Settings } from '@/types';
 
 type AddressTab = 'business' | 'mailing';
@@ -90,45 +94,34 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
         </Field>
 
         <Field label="Address">
-          <div className="flex rounded border border-border p-0.5 mb-1.5">
-            {(['business', 'mailing'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setAddressTab(tab)}
-                className={cn(
-                  'flex-1 h-7 text-[12px] rounded-sm transition-colors',
-                  addressTab === tab
-                    ? 'bg-secondary text-foreground font-medium'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {tab === 'business' ? 'Business' : 'Mailing'}
-              </button>
-            ))}
-          </div>
-          <textarea
+          <SegmentedControl
+            value={addressTab}
+            onChange={setAddressTab}
+            options={[
+              { value: 'business', label: 'Business' },
+              { value: 'mailing', label: 'Mailing' },
+            ]}
+            className="mb-1.5"
+          />
+          <Textarea
             key={addressTab}
             value={addressTab === 'business' ? draft.businessAddress : draft.mailingAddress}
-            onChange={(e) =>
+            onChange={(value) =>
               setDraft({
                 ...draft,
-                [addressTab === 'business' ? 'businessAddress' : 'mailingAddress']:
-                  e.target.value,
+                [addressTab === 'business' ? 'businessAddress' : 'mailingAddress']: value,
               })
             }
             rows={3}
             placeholder="Street, city, state, zip"
-            className="w-full px-3 py-2 text-[13px] border border-border rounded bg-background outline-none focus:border-primary resize-none"
           />
         </Field>
 
         <Field label="Payment details">
-          <textarea
+          <Textarea
             value={draft.paymentDetails}
-            onChange={(e) => setDraft({ ...draft, paymentDetails: e.target.value })}
+            onChange={(paymentDetails) => setDraft({ ...draft, paymentDetails })}
             rows={4}
-            className="w-full px-3 py-2 text-[13px] border border-border rounded bg-background outline-none focus:border-primary resize-none"
           />
         </Field>
 
@@ -149,7 +142,10 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           />
         </Field>
 
-        <Field label="PayPal sandbox mode">
+        <Field
+          label="PayPal sandbox mode"
+          hint="When enabled, clients pay with sandbox accounts. Turn off for live payments."
+        >
           <label className="flex items-center gap-2 text-[13px] text-foreground">
             <input
               type="checkbox"
@@ -159,9 +155,6 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
             />
             Use PayPal sandbox for testing
           </label>
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            When enabled, clients pay with sandbox accounts. Turn off for live payments.
-          </p>
         </Field>
 
         <Field label="Default tax rate (%)">
@@ -173,19 +166,22 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           />
         </Field>
 
-        <Field label="Default due date (days)">
+        <Field
+          label="Default due date (days)"
+          hint="Days after the issue date on new invoices."
+        >
           <TextInput
             type="number"
             value={String(draft.defaultDueDays)}
             onChange={(v) => setDraft({ ...draft, defaultDueDays: v === '' ? 0 : Number(v) })}
             placeholder="14"
           />
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            Days after the issue date on new invoices.
-          </p>
         </Field>
 
-        <Field label="Payment reminder interval (days)">
+        <Field
+          label="Payment reminder interval (days)"
+          hint="Unpaid invoices receive an automatic reminder email this many days after the last send."
+        >
           <TextInput
             type="number"
             value={String(draft.reminderIntervalDays)}
@@ -197,12 +193,12 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
             }
             placeholder="5"
           />
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            Unpaid invoices receive an automatic reminder email this many days after the last send.
-          </p>
         </Field>
 
-        <Field label="Late notice interval (days)">
+        <Field
+          label="Late notice interval (days)"
+          hint="Overdue invoices receive an automatic late notice this many days after the last send."
+        >
           <TextInput
             type="number"
             value={String(draft.lateReminderIntervalDays)}
@@ -214,9 +210,6 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
             }
             placeholder="3"
           />
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            Overdue invoices receive an automatic late notice this many days after the last send.
-          </p>
         </Field>
 
         <Field label="Logo" className="pb-[2px]">
@@ -276,16 +269,12 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
           </div>
         </Field>
 
-        <div className="pt-[22px] border-t border-border flex items-center gap-3">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="h-8 px-3 text-[13px] bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50"
-          >
+        <FormFooter className="items-center gap-3">
+          <Button variant="primary" onClick={save} disabled={saving} loading={saving}>
             {saving ? 'Saving…' : 'Save'}
-          </button>
-          {saved && <span className="text-[13px] text-[#34C759]">Saved.</span>}
-        </div>
+          </Button>
+          <SaveFeedback visible={saved} />
+        </FormFooter>
       </div>
     </div>
   );

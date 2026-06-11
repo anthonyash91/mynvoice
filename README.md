@@ -1,86 +1,293 @@
 # MyNvoice
 
-A clean invoicing app for freelancers and solo operators. Create professional invoices, track billable work on a calendar, manage clients, and handle the full payment lifecycle — from sending an invoice to confirming payment — without leaving your browser.
+MyNvoice is a browser-based invoicing app for freelancers and solo operators. Create professional invoices, log billable work on a calendar, email clients with PDF attachments, collect payments through PayPal or manual bank transfer, and run the full payment lifecycle without spreadsheets or separate tools.
 
-Built with React, Supabase, and Resend.
+Built with **React 19**, **TypeScript**, **Vite**, **Tailwind CSS v4**, **Supabase** (Postgres, Auth, Edge Functions), **Resend** (email), and **PayPal** (optional online checkout).
 
 ---
 
-## Features
+## Table of contents
 
-### Invoices
+- [App overview](#app-overview)
+- [Invoices](#invoices)
+- [Clients](#clients)
+- [Calendar & recurring billing](#calendar--recurring-billing)
+- [Email templates](#email-templates)
+- [Email history](#email-history)
+- [Automated reminders](#automated-reminders)
+- [Public payment flow](#public-payment-flow)
+- [PayPal checkout](#paypal-checkout)
+- [Settings](#settings)
+- [How it works](#how-it-works)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+- [Scripts](#scripts)
+- [Project structure](#project-structure)
+- [License](#license)
 
-- Create drafts or send invoices directly to clients
-- Hourly and fixed line items, optional tax, notes, and payment instructions
-- Auto-incrementing invoice numbers
-- Status tracking: **Draft**, **Unpaid**, **Overdue**, **Payment sent**, and **Paid**
-- Live print preview and one-click PDF download
-- Email invoices with a PDF attachment via Resend
+---
 
-### Clients
+## App overview
 
-- Store company name, contact, address, and multiple email addresses
-- Save default hourly rates and additional rate tiers
-- Define recurring line items that roll into the calendar automatically
+After signing in, the sidebar provides six areas:
 
-### Calendar
-
-- Log billable work day by day
-- See unbilled totals at a glance
-- Import calendar entries into new invoices
-- Recurring items appear on scheduled days (with per-client exclusions)
-
-### Email templates
-
-Customize HTML email templates with a live preview:
-
-| Template | When it's used |
+| View | Purpose |
 | --- | --- |
-| **Unpaid** | New invoices and resends while payment is outstanding |
-| **Reminder** | Friendly follow-up for unpaid invoices |
-| **Late** | Overdue notices |
-| **Payment received** | Sent to the client after you confirm payment |
+| **Invoices** | Create, edit, send, download, and track invoice status |
+| **Calendar** | Log daily billable work and import entries into invoices |
+| **Clients** | Manage client records, rates, and recurring line items |
+| **History** | Review every invoice email sent (type, date, client) |
+| **Templates** | Customize HTML/CSS email templates with live preview |
+| **Settings** | Business profile, logo, tax defaults, PayPal, and reminder intervals |
 
-Templates support variables like `{{clientName}}`, `{{invoiceNumber}}`, `{{total}}`, `{{invoiceLink}}`, and `{{paymentDate}}`.
+Invoices open in a slide-over panel with a live print preview, action menu (send, remind, download, status changes, delete), and per-invoice reminder controls.
 
-### Public payment flow
+---
 
-Clients don't need an account. Invoice emails include links to a public invoice page where they can:
+## Invoices
 
-1. View the full invoice
-2. Click **Payment has been sent** when they've paid
-3. Wait for you to confirm receipt
+### Creating and editing
 
-You receive an email with a **Payment has been received** link. Once you confirm, the invoice is marked **Paid** and the client gets a **Payment received** email with an updated PDF attachment.
+- **New invoice** — pick a client, set issue date, optional due date, line items, notes, and tax.
+- **Line item types** — hourly (quantity × rate), fixed (flat fee), and recurring (imported from the calendar).
+- **Tax** — optional per-invoice tax rate; can default from Settings.
+- **Drafts** — save without sending; drafts keep their status until you send.
+- **Invoice numbers** — auto-increment per client (`INV-001`, `INV-002`, …). The next number is tracked in Settings.
+- **Due dates** — optional. When enabled, defaults to issue date + `defaultDueDays` from Settings.
+
+### Status lifecycle
+
+| Status | Meaning |
+| --- | --- |
+| `draft` | Saved locally in the app; not emailed |
+| `unpaid` | Sent to the client; awaiting payment |
+| `overdue` | Unpaid and past the due date (computed in the UI and by the reminder cron) |
+| `payment_sent` | Client marked payment as sent on the public invoice page |
+| `paid` | You confirmed receipt; `paid_at` is recorded |
+
+The invoices table shows **Due** as a countdown (or overdue label) for open invoices, and **—** once paid. The **Reminder** column shows the next scheduled automatic email (or **—**, **Paused**, or **Snoozed**).
+
+### Sending and resending
+
+- **Send invoice** — emails the client with an HTML message and PDF attachment via Resend.
+- **Resend invoice** — same flow for already-sent invoices.
+- **Send reminder** — available for unpaid invoices; uses the Reminder template.
+- **PDF attachment** — generated server-side in the `send-invoice` Edge Function (compact, text-based PDF) so large client-side captures do not block delivery.
+- **Download PDF** — client-side print-quality PDF from the live invoice preview (html2canvas + jsPDF).
+- **Visit public invoice** — opens the client-facing page in a new tab.
+
+Each send records `email_send_count`, `last_email_sent_at`, and `last_email_sent_kind` on the invoice, and appends a row to email history.
+
+### Per-invoice reminder controls
+
+From the invoice panel you can:
+
+- **Pause** automatic reminders for this invoice
+- **Snooze** reminders for 3, 7, or 14 days
+- **Override** unpaid and overdue reminder intervals (days between emails)
+
+Overrides stack with client-level and global Settings intervals (invoice → client → Settings).
+
+### Invoice panel actions
+
+- Change status manually (draft, unpaid, paid, etc.)
+- Edit line items and client link
+- Delete invoice (unbills linked calendar entries)
+
+---
+
+## Clients
+
+Each client stores:
+
+- **Company name** and **contact name** (owner)
+- **Primary email** and **additional emails** (all receive invoice emails)
+- **Address** (shown on invoices)
+- **Default hourly rate** and **additional rate tiers** (quick-select when logging calendar work)
+- **Recurring line items** — fixed or hourly charges on a chosen day of month (e.g. retainer on the 1st)
+- **Reminder interval overrides** — optional per-client unpaid/late email spacing
+- **Recurring calendar exclusions** — skip a recurring item for a specific month
+
+Client edit and new-client panels match the width of the clients list for a consistent layout.
+
+---
+
+## Calendar & recurring billing
+
+### Work log
+
+- Log **hourly** or **fixed** entries per client per day.
+- See **unbilled totals** on each calendar day and month summary.
+- **Bill entries** by importing them into a new invoice (entries link to the invoice and show as billed).
+
+### Recurring line items
+
+- Defined on the client record (description, rate, day of month, hourly vs fixed).
+- Automatically appear on the calendar for unbilled months.
+- **Exclusions** — skip one recurring charge for one month (stored per client and in local fallback storage).
+- Recurring entries import into invoices like manual calendar entries.
+
+### New invoice from calendar
+
+When creating an invoice, unbilled calendar entries (including generated recurring entries) for that client can be pulled in as line items.
+
+---
+
+## Email templates
+
+Four customizable HTML templates with shared CSS, edited in **Templates** with live preview:
+
+| Template | When it is sent |
+| --- | --- |
+| **Unpaid** | First send and resends while payment is outstanding |
+| **Reminder** | Manual reminder from the invoice menu (unpaid only) |
+| **Late** | Automatic overdue notices (cron) |
+| **Payment received** | After you confirm payment on the public confirm link |
+
+### Template variables
+
+| Variable | Description |
+| --- | --- |
+| `{{clientName}}` | Client display name |
+| `{{invoiceNumber}}` | Invoice number |
+| `{{issueDate}}` | Issue date (formatted) |
+| `{{dueDate}}` | Due date or — |
+| `{{dueDateLine}}` | Sentence: “Payment is due …” |
+| `{{total}}` | Invoice total (currency) |
+| `{{businessName}}` | Your business name |
+| `{{invoiceLink}}` | Public invoice URL (`/i/:token`) |
+| `{{paymentSentLink}}` | Client “payment sent” URL (`/i/:token/payment-sent`) |
+| `{{confirmPaymentLink}}` | Owner confirm URL (`/confirm-payment/:token`) |
+| `{{paymentDate}}` | Date marked paid |
+| `{{emailSendCount}}` | Emails sent count (including current send in previews) |
+| `{{nextReminderDate}}` | Next automatic reminder date |
+
+Templates are stored in Supabase (`user_settings.email_templates`) with localStorage fallback for offline editing sync.
+
+---
+
+## Email history
+
+The **History** view lists every invoice email sent:
+
+- Invoice number and client name
+- Email kind (unpaid, reminder, late, payment_received)
+- Sent timestamp
+
+Useful for auditing what went out and when reminders fired.
+
+---
+
+## Automated reminders
+
+A scheduled Edge Function (`send-invoice-reminders`) runs daily (configure via `migrate-invoice-email-reminders.sql` and Supabase cron/Vault):
+
+1. Marks **unpaid** invoices past due date as **overdue**
+2. Sends **reminder** emails for unpaid invoices on the configured interval after the last email
+3. Sends **late** emails for overdue invoices on the late interval
+
+Intervals resolve in order: **invoice override → client override → Settings default**.
+
+Invoices respect **pause**, **snooze**, and per-invoice interval overrides. The cron requires `RESEND_API_KEY`, `APP_URL`, and service-role authentication.
+
+---
+
+## Public payment flow
+
+Clients do not need an account. Invoice emails include a secure link to a public page.
 
 ```mermaid
 sequenceDiagram
-  participant You
+  participant Owner
   participant Client
   participant App
   participant Resend
 
-  You->>App: Send invoice email
-  App->>Resend: Email + PDF attachment
-  Resend->>Client: Invoice with public link
+  Owner->>App: Send invoice email
+  App->>Resend: HTML + PDF attachment
+  Resend->>Client: Email with public link
 
   Client->>App: Open /i/:token
-  Client->>App: Mark payment sent
-  App->>Resend: Notify you
-  Resend->>You: Confirm payment link
+  Client->>App: Click "Payment has been sent"
+  App->>Resend: Notify owner
+  Resend->>Owner: Email with confirm link
 
-  You->>App: Open /confirm-payment/:token
+  Owner->>App: Open /confirm-payment/:token
+  Owner->>App: Click "Confirm payment received"
   App->>App: Mark invoice paid
-  App->>Resend: Payment received email + paid PDF
-  Resend->>Client: Thank you + invoice attachment
+  App->>Resend: Payment received email + PDF
+  Resend->>Client: Thank you + paid invoice PDF
 ```
 
-### Settings
+### Public routes (no login)
 
-- Business name, email, and address (business + mailing)
-- Payment details shown on invoices
-- Logo upload (displayed on invoice PDFs)
-- Default tax rate and due-date offset
+| Route | Who | What happens |
+| --- | --- | --- |
+| `/i/:token` | Client | View invoice, pay with PayPal, or mark payment sent |
+| `/i/:token/payment-sent` | Client | Same page with a prominent confirmation card (no auto-submit on load) |
+| `/confirm-payment/:token` | Owner | Preview invoice details, then explicitly confirm payment received |
+
+Security notes:
+
+- Public actions use opaque UUID tokens (`public_token`, `owner_confirm_token`), not guessable IDs.
+- Owner confirmation requires a button click (safe from email link prefetchers).
+- Payment-sent marking requires a button click on the public page.
+
+---
+
+## PayPal checkout
+
+Optional per-business PayPal integration in Settings:
+
+- **Client ID** and **Client Secret** (stored in Supabase; secret used only in Edge Functions)
+- **Sandbox** toggle for testing
+
+On the public invoice page, clients with PayPal configured see a **Pay with PayPal** button. Checkout:
+
+1. Creates a PayPal order server-side (`invoice-public`)
+2. Client approves in the PayPal widget
+3. Server captures payment, validates amount and invoice reference
+4. Marks invoice paid and sends the payment received email
+
+---
+
+## Settings
+
+| Setting | Purpose |
+| --- | --- |
+| Business name, email, addresses | Shown on invoices and used as email sender |
+| Payment details | Bank instructions on the invoice footer |
+| Logo | Image on invoice PDFs (client-side download/print) |
+| Default tax rate | Pre-fills new invoices |
+| Default due days | Offset from issue date when due date is enabled |
+| Reminder intervals | Days between automatic unpaid and late emails |
+| PayPal credentials | Enable public PayPal checkout |
+| Next invoice number | Counter for auto-numbering |
+
+The business email must match a **verified sender** in Resend.
+
+---
+
+## How it works
+
+### Authentication
+
+- Email/password via Supabase Auth
+- Row Level Security (RLS) on all tenant tables — users only see their own data
+- Settings row auto-created on signup (Postgres trigger)
+
+### Edge functions
+
+| Function | Auth | Role |
+| --- | --- | --- |
+| `send-invoice` | User JWT | Send invoice/reminder emails; server-generates PDF from `invoiceId` |
+| `invoice-public` | Public token + service role | Public invoice read, payment-sent, owner confirm, PayPal |
+| `send-invoice-reminders` | Service role (cron) | Daily overdue marking and automatic reminder/late emails |
+
+### Data storage
+
+- **Supabase Postgres** — clients, invoices, calendar entries, settings, email history
+- **localStorage** — legacy import path, email template cache, recurring exclusion fallback
 
 ---
 
@@ -91,46 +298,9 @@ sequenceDiagram
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
 | Backend | Supabase (Postgres, Auth, Edge Functions) |
 | Email | Resend |
-| PDF | html2canvas-pro + jsPDF (client), jsPDF (edge function) |
-
----
-
-## How it works
-
-### App views
-
-After signing in, the sidebar gives you five areas:
-
-- **Invoices** — list, open, send, download, and manage invoice status
-- **Calendar** — track daily billable entries and build invoices from them
-- **Clients** — manage client records and recurring billing rules
-- **Templates** — edit email HTML/CSS with live preview
-- **Settings** — business profile, logo, and defaults
-
-### Invoice statuses
-
-| Status | Meaning |
-| --- | --- |
-| `draft` | Saved but not sent |
-| `unpaid` | Sent and awaiting payment |
-| `overdue` | Unpaid past the due date (derived in the UI) |
-| `payment_sent` | Client marked payment as sent |
-| `paid` | You confirmed payment; `paid_at` is recorded |
-
-### Public routes (no login)
-
-| Route | Purpose |
-| --- | --- |
-| `/i/:token` | Client views invoice |
-| `/i/:token/payment-sent` | Client marks payment sent |
-| `/confirm-payment/:token` | Owner confirms payment received |
-
-### Edge functions
-
-| Function | Auth | Role |
-| --- | --- | --- |
-| `send-invoice` | User JWT | Sends invoice/reminder emails with optional PDF |
-| `invoice-public` | Service role (public tokens) | Public invoice API, payment flow, owner notifications |
+| Payments | PayPal REST API (optional) |
+| PDF (download) | html2canvas-pro + jsPDF (client) |
+| PDF (email) | jsPDF (Edge Function, server-side) |
 
 ---
 
@@ -141,7 +311,8 @@ After signing in, the sidebar gives you five areas:
 - Node.js 20+
 - A [Supabase](https://supabase.com) project
 - A [Resend](https://resend.com) account with a verified sender domain
-- Supabase CLI (`npm i -g supabase`) for deploying edge functions
+- Supabase CLI (`npm i -g supabase`) for deploying Edge Functions
+- Optional: PayPal developer app for online payments
 
 ### 1. Clone and install
 
@@ -153,8 +324,6 @@ npm install
 
 ### 2. Configure the app
 
-Copy the example env file and fill in your Supabase credentials:
-
 ```bash
 cp .env.example .env
 ```
@@ -165,24 +334,18 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 VITE_APP_URL=http://localhost:5173
 ```
 
-`VITE_APP_URL` must match the URL clients use to open invoice links. Use your production domain in production (no trailing slash).
+`VITE_APP_URL` must be the URL clients use to open invoice links (production domain in prod, no trailing slash).
 
 ### 3. Set up the database
 
-In the Supabase SQL Editor, run:
+In the Supabase SQL Editor:
 
-1. `supabase/schema.sql` — base tables, RLS, and triggers
-2. Migration files in `supabase/` if upgrading an existing project:
-   - `migrate-email-templates.sql`
-   - `migrate-invoice-payment-flow.sql`
-   - `migrate-invoice-paid-at.sql`
-   - `migrate-recurring-calendar-exclusions.sql`
+1. Run `supabase/schema.sql` for a fresh project
+2. For existing databases, apply migrations in `supabase/migrate-*.sql` as needed (payment flow, email templates, reminders, PayPal, history, etc.)
 
-Enable email auth in Supabase (Authentication → Providers → Email).
+Enable **Email** auth in Supabase (Authentication → Providers).
 
-### 4. Deploy edge functions
-
-Link your project and set secrets:
+### 4. Deploy Edge Functions
 
 ```bash
 supabase login
@@ -192,36 +355,23 @@ supabase secrets set RESEND_API_KEY=re_your_key
 supabase secrets set APP_URL=https://your-production-domain.com
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is injected automatically on deploy — do not set it manually.
-
-Deploy both functions:
+`SUPABASE_SERVICE_ROLE_KEY` is injected on deploy — do not set it manually.
 
 ```bash
 npm run functions:deploy
 ```
 
-Use the same email address in **Settings → Email** as your verified Resend sender.
+### 5. Configure automated reminders (optional)
 
-### 5. Run locally
+Run `supabase/migrate-invoice-email-reminders.sql` in the SQL Editor (includes pg_cron setup instructions and Vault secret placeholders).
+
+### 6. Run locally
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173), sign up, and configure your business details in Settings before sending your first invoice.
-
-#### Optional: local edge functions
-
-Local function testing requires Docker Desktop:
-
-```bash
-cp supabase/functions/.env.example supabase/functions/.env
-# Add SUPABASE_URL, SERVICE_ROLE_KEY, RESEND_API_KEY, APP_URL
-
-npm run functions:serve
-```
-
-For most workflows, deploying to Supabase cloud is simpler than running functions locally.
+Open [http://localhost:5173](http://localhost:5173), sign up, fill in **Settings**, then create a client and send a test invoice.
 
 ---
 
@@ -233,7 +383,7 @@ For most workflows, deploying to Supabase cloud is simpler than running function
 | `npm run build` | Typecheck and production build |
 | `npm run preview` | Preview production build |
 | `npm run lint` | Run ESLint |
-| `npm run functions:deploy` | Deploy `send-invoice` and `invoice-public` |
+| `npm run functions:deploy` | Deploy all three Edge Functions |
 | `npm run functions:serve` | Serve `invoice-public` locally (Docker required) |
 
 ---
@@ -242,18 +392,19 @@ For most workflows, deploying to Supabase cloud is simpler than running function
 
 ```
 src/
-  components/     UI panels, invoice print layout, form fields
-  views/          Invoices, clients, calendar, templates, settings, public pages
-  hooks/          Auth, app store, confirm dialogs
-  lib/            Database, email, PDF, calculations, templates
+  components/     UI panels, forms, invoice print layout, shared Button/Field/etc.
+  views/            Invoices, clients, calendar, history, templates, settings, public pages
+  hooks/            Auth, app store, confirm dialogs
+  lib/              Database, email, PDF, calculations, templates, reminders
 
 supabase/
-  schema.sql      Database schema
-  migrate-*.sql   Incremental migrations
+  schema.sql              Full schema for new projects
+  migrate-*.sql           Incremental migrations
   functions/
-    send-invoice/       Authenticated invoice email sender
-    invoice-public/     Public invoice + payment flow
-    _shared/            Shared server-side PDF generation
+    send-invoice/         Authenticated email sender + server PDF
+    invoice-public/       Public invoice API + payment flow + PayPal
+    send-invoice-reminders/  Daily cron for overdue + reminder/late emails
+    _shared/              Shared PDF, email, PayPal, reminder helpers
 ```
 
 ---
