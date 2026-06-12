@@ -8,6 +8,23 @@ const DEFAULT_CLIENT_REMINDER_FIELDS = {
 } as const;
 
 const STORAGE_KEY = 'mynvoice-data';
+const LOCAL_IMPORT_PREFIX = 'mynvoice-local-imported';
+
+export function hasImportedLocalData(userId: string): boolean {
+  try {
+    return localStorage.getItem(`${LOCAL_IMPORT_PREFIX}:${userId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markLocalDataImported(userId: string): void {
+  try {
+    localStorage.setItem(`${LOCAL_IMPORT_PREFIX}:${userId}`, '1');
+  } catch {
+    // Ignore quota errors.
+  }
+}
 
 function today(): string {
   return new Date().toISOString().split('T')[0];

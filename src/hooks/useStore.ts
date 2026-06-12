@@ -52,7 +52,7 @@ import { publicInvoiceUrl } from '@/lib/appUrl';
 import { sendInvoiceWithPdf } from '@/lib/email';
 import { migrateEmailTemplates } from '@/lib/emailTemplates';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
-import { loadData } from '@/lib/storage';
+import { hasImportedLocalData, loadData, markLocalDataImported } from '@/lib/storage';
 
 function getErrorMessage(err: unknown): string {
   if (err && typeof err === 'object' && 'message' in err) {
@@ -108,12 +108,13 @@ export function useStore(user: User | null) {
       let appData = await fetchAppData(user.id);
 
       const hasRemoteData = appData.clients.length > 0 || appData.invoices.length > 0;
-      if (!hasRemoteData) {
+      if (!hasRemoteData && !hasImportedLocalData(user.id)) {
         const local = loadData();
         const hasLocalData = local.clients.length > 0 || local.invoices.length > 0;
         if (hasLocalData) {
           try {
             appData = await importLocalData(user.id, local);
+            markLocalDataImported(user.id);
           } catch (importErr) {
             console.warn('Local data import skipped:', importErr);
           }

@@ -5,6 +5,10 @@ import {
   prepareEmailTemplatesForStorage,
 } from '@/lib/emailTemplates';
 import { loadEmailTemplatesFromStorage } from '@/lib/emailTemplateStorage';
+import {
+  loadPayPalSettingsFromStorage,
+  savePayPalSettingsToStorage,
+} from '@/lib/paypalSettingsStorage';
 import { emptyInvoiceReminderSettings, isInvoicePastDue } from '@/lib/invoice';
 import { supabase } from '@/lib/supabase';
 import type {
@@ -533,7 +537,33 @@ function resolveEmailTemplates(
   return migrateEmailTemplates(rawTemplates);
 }
 
+function resolvePayPalSettings(
+  userId: string,
+  row: DbSettings
+): Pick<Settings, 'paypalClientId' | 'paypalClientSecret' | 'paypalSandbox'> {
+  const stored = loadPayPalSettingsFromStorage(userId);
+  const hasDbSandbox = typeof row.paypal_sandbox === 'boolean';
+  const hasDbClientId = row.paypal_client_id !== undefined;
+  const hasDbClientSecret = row.paypal_client_secret !== undefined;
+  const dbAvailable = hasDbSandbox && hasDbClientId && hasDbClientSecret;
+
+  if (stored?.dbUnavailable || !dbAvailable) {
+    return {
+      paypalClientId: stored?.clientId ?? String(row.paypal_client_id ?? ''),
+      paypalClientSecret: stored?.clientSecret ?? String(row.paypal_client_secret ?? ''),
+      paypalSandbox: stored?.sandbox ?? true,
+    };
+  }
+
+  return {
+    paypalClientId: String(row.paypal_client_id ?? ''),
+    paypalClientSecret: String(row.paypal_client_secret ?? ''),
+    paypalSandbox: row.paypal_sandbox ?? true,
+  };
+}
+
 function toSettings(userId: string, row: DbSettings): Settings {
+  const paypal = resolvePayPalSettings(userId, row);
   return {
     businessName: row.business_name,
     email: row.email,
@@ -544,9 +574,7 @@ function toSettings(userId: string, row: DbSettings): Settings {
     defaultDueDays: Number(row.default_due_days ?? 14),
     reminderIntervalDays: Number(row.reminder_interval_days ?? 5),
     lateReminderIntervalDays: Number(row.late_reminder_interval_days ?? 3),
-    paypalClientId: String(row.paypal_client_id ?? ''),
-    paypalClientSecret: String(row.paypal_client_secret ?? ''),
-    paypalSandbox: row.paypal_sandbox ?? true,
+    ...paypal,
     logo: row.logo,
     emailTemplates: resolveEmailTemplates(userId, row.email_templates),
   };
@@ -774,7 +802,9 @@ export async function upsertSettings(userId: string, settings: Settings): Promis
     ({ error } = await supabase.from('user_settings').upsert(row, { onConflict: 'user_id' }));
   }
 
+  let paypalDbUnavailable = false;
   if (error && isMissingPayPalColumnError(error)) {
+    paypalDbUnavailable = true;
     delete row.paypal_client_id;
     delete row.paypal_client_secret;
     delete row.paypal_sandbox;
@@ -782,6 +812,13 @@ export async function upsertSettings(userId: string, settings: Settings): Promis
   }
 
   if (error) throw error;
+
+  savePayPalSettingsToStorage(userId, {
+    clientId: settings.paypalClientId,
+    clientSecret: settings.paypalClientSecret,
+    sandbox: settings.paypalSandbox,
+    dbUnavailable: paypalDbUnavailable,
+  });
 }
 
 export async function insertClient(
