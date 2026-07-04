@@ -174,17 +174,28 @@ export function ImportHistoricalInvoicePanel({
     setError(null);
     setBulkResult(null);
     try {
-      if (parsedCsv.errors.length > 0) {
-        setError(parsedCsv.errors.join('\n'));
-        return;
-      }
       if (parsedCsv.invoices.length === 0) {
-        setError('No invoices found in CSV.');
+        setError(
+          parsedCsv.errors.length > 0
+            ? parsedCsv.errors.join('\n')
+            : 'No invoices found in CSV.'
+        );
         return;
       }
       const result = await onBulkImport(csvText);
       setBulkResult(result);
-      if (result.errors.length === 0) {
+      const messages: string[] = [];
+      if (parsedCsv.errors.length > 0) {
+        messages.push(
+          `Skipped ${parsedCsv.errors.length} row${parsedCsv.errors.length === 1 ? '' : 's'} with parse errors:\n${parsedCsv.errors.join('\n')}`
+        );
+      }
+      if (result.errors.length > 0) {
+        messages.push(result.errors.join('\n'));
+      }
+      if (messages.length > 0) {
+        setError(messages.join('\n\n'));
+      } else {
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
       }
@@ -364,7 +375,7 @@ export function ImportHistoricalInvoicePanel({
           <>
             <Field
               label="CSV file"
-              hint="Required columns: client, number, issue_date, status, description, amount."
+              hint="Required columns: client, number, issue_date, status, description, amount. Dates can be YYYY-MM-DD or M/D/YYYY."
             >
               <input
                 type="file"
@@ -395,11 +406,17 @@ export function ImportHistoricalInvoicePanel({
                 {parsedCsv.invoices.length} invoice
                 {parsedCsv.invoices.length === 1 ? '' : 's'} ready
                 {parsedCsv.errors.length > 0
-                  ? ` · ${parsedCsv.errors.length} parse error${parsedCsv.errors.length === 1 ? '' : 's'}`
+                  ? ` · ${parsedCsv.errors.length} row${parsedCsv.errors.length === 1 ? '' : 's'} skipped`
                   : ''}
               </p>
               <p className="mt-1">Repeat the same client + number on multiple rows for extra line items.</p>
             </div>
+
+            {parsedCsv.errors.length > 0 && (
+              <div className="rounded border border-destructive/30 bg-destructive/5 px-3 py-2 text-[12px] text-destructive whitespace-pre-wrap max-h-40 overflow-auto">
+                {parsedCsv.errors.join('\n')}
+              </div>
+            )}
 
             {bulkResult && (
               <div className="rounded border border-border px-3 py-2 text-[12px] space-y-1">
@@ -427,7 +444,7 @@ export function ImportHistoricalInvoicePanel({
         <Button
           variant="primary"
           onClick={mode === 'single' ? saveSingle : runBulkImport}
-          disabled={saving}
+          disabled={saving || (mode === 'bulk' && parsedCsv.invoices.length === 0)}
           loading={saving}
           saved={saved}
           savedLabel={mode === 'bulk' ? 'Imported' : 'Saved'}

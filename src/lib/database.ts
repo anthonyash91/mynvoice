@@ -229,6 +229,24 @@ function isMissingHistoricalColumnError(error: { message?: string } | null): boo
   return message.includes('is_historical');
 }
 
+function formatImportError(err: unknown): string {
+  if (err instanceof Error) {
+    const message = err.message;
+    if (message.includes('invoices_user_id_client_id_number_key')) {
+      return 'An invoice with this number already exists for this client.';
+    }
+    return message;
+  }
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const message = String((err as { message: unknown }).message);
+    if (message.includes('invoices_user_id_client_id_number_key')) {
+      return 'An invoice with this number already exists for this client.';
+    }
+    return message;
+  }
+  return 'Import failed.';
+}
+
 function isMissingReminderControlColumnError(error: { message?: string } | null): boolean {
   const message = error?.message?.toLowerCase() ?? '';
   return (
@@ -1299,7 +1317,7 @@ export async function bulkImportHistoricalInvoices(
         newClients.push(newClient);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Import failed.';
+      const message = formatImportError(err);
       errors.push(`${input.number} (${input.clientName}): ${message}`);
     }
   }

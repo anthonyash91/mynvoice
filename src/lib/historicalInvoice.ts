@@ -43,15 +43,24 @@ export function historicalInvoiceLabel(): string {
   return 'Historical';
 }
 
+function detectDelimiter(text: string): ',' | '\t' {
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
+  const tabs = firstLine.match(/\t/g)?.length ?? 0;
+  const commas = firstLine.match(/,/g)?.length ?? 0;
+  return tabs > commas ? '\t' : ',';
+}
+
 function parseCsvRows(text: string): string[][] {
+  const normalized = text.replace(/^\uFEFF/, '');
+  const delimiter = detectDelimiter(normalized);
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = '';
   let inQuotes = false;
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    const next = text[i + 1];
+  for (let i = 0; i < normalized.length; i += 1) {
+    const char = normalized[i];
+    const next = normalized[i + 1];
 
     if (inQuotes) {
       if (char === '"' && next === '"') {
@@ -70,7 +79,7 @@ function parseCsvRows(text: string): string[][] {
       continue;
     }
 
-    if (char === ',') {
+    if (char === delimiter) {
       row.push(cell.trim());
       cell = '';
       continue;
@@ -94,23 +103,64 @@ function parseCsvRows(text: string): string[][] {
 }
 
 function normalizeHeader(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, '_');
+  return value
+    .trim()
+    .replace(/^\uFEFF/, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_');
 }
 
 function parseDate(value: string, field: string, rowNumber: number): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    throw new Error(`Row ${rowNumber}: ${field} must be YYYY-MM-DD.`);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
   }
-  return trimmed;
+
+  const slashMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slashMatch) {
+    const [, month, day, year] = slashMatch;
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  const excelSerial = Number(trimmed);
+  if (Number.isFinite(excelSerial) && excelSerial > 30_000 && excelSerial < 100_000) {
+    const ms = (excelSerial - 25_569) * 86_400_000;
+    const parsed = new Date(ms);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+
+  throw new Error(
+    `Row ${rowNumber}: ${field} must be YYYY-MM-DD or M/D/YYYY (got "${trimmed}").`
+  );
+}
+
+function normalizeStatus(value: string): InvoiceStoredStatus | null {
+  const raw = value.trim().toLowerCase();
+  const aliases: Record<string, InvoiceStoredStatus> = {
+    sent: 'unpaid',
+    open: 'unpaid',
+    outstanding: 'unpaid',
+    closed: 'paid',
+    complete: 'paid',
+    completed: 'paid',
+    pending: 'unpaid',
+  };
+  if (aliases[raw]) return aliases[raw];
+  if (HISTORICAL_STATUSES.has(raw as InvoiceStoredStatus)) {
+    return raw as InvoiceStoredStatus;
+  }
+  return null;
 }
 
 function parseStatus(value: string, rowNumber: number): InvoiceStoredStatus {
-  const status = value.trim().toLowerCase() as InvoiceStoredStatus;
-  if (!HISTORICAL_STATUSES.has(status)) {
+  const status = normalizeStatus(value);
+  if (!status) {
     throw new Error(
-      `Row ${rowNumber}: status must be one of paid, unpaid, overdue, draft, payment_sent.`
+      `Row ${rowNumber}: status must be paid, unpaid, overdue, draft, or payment_sent (got "${value.trim()}").`
     );
   }
   return status;
@@ -119,9 +169,10 @@ function parseStatus(value: string, rowNumber: number): InvoiceStoredStatus {
 function parseNumber(value: string, field: string, rowNumber: number): number {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`Row ${rowNumber}: ${field} is required.`);
-  const parsed = Number(trimmed);
+  const normalized = trimmed.replace(/[$,\s]/g, '');
+  const parsed = Number(normalized);
   if (!Number.isFinite(parsed)) {
-    throw new Error(`Row ${rowNumber}: ${field} must be a number.`);
+    throw new Error(`Row ${rowNumber}: ${field} must be a number (got "${trimmed}").`);
   }
   return parsed;
 }
@@ -198,6 +249,7 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
   for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex];
     const rowNumber = rowIndex + 1;
+    if (row.every((cell) => !cell.trim())) continue;
 
     try {
       const read = (column: string): string => row[index[column]] ?? '';
