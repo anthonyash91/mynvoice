@@ -89,6 +89,54 @@ export function compareInvoicesForList(a: Invoice, b: Invoice): number {
   return compareInvoiceNumbers(b.number, a.number);
 }
 
+export type InvoiceDashboardStat = {
+  count: number;
+  amount: number;
+};
+
+export type InvoiceDashboardStats = {
+  total: InvoiceDashboardStat;
+  pending: InvoiceDashboardStat;
+  paid: InvoiceDashboardStat;
+};
+
+export function invoiceTotalAmount(invoice: Invoice): number {
+  return calculateTotal(invoice.lineItems, invoice.taxEnabled, invoice.taxRate).total;
+}
+
+export function isPaidInvoice(invoice: Invoice): boolean {
+  return resolveStatus(invoice) === 'paid';
+}
+
+export function isPendingInvoice(invoice: Invoice): boolean {
+  const status = resolveStatus(invoice);
+  return status === 'unpaid' || status === 'overdue' || status === 'payment_sent';
+}
+
+export function computeInvoiceDashboardStats(invoices: Invoice[]): InvoiceDashboardStats {
+  const stats: InvoiceDashboardStats = {
+    total: { count: 0, amount: 0 },
+    pending: { count: 0, amount: 0 },
+    paid: { count: 0, amount: 0 },
+  };
+
+  for (const invoice of invoices) {
+    const amount = invoiceTotalAmount(invoice);
+    stats.total.count += 1;
+    stats.total.amount += amount;
+
+    if (isPaidInvoice(invoice)) {
+      stats.paid.count += 1;
+      stats.paid.amount += amount;
+    } else if (isPendingInvoice(invoice)) {
+      stats.pending.count += 1;
+      stats.pending.amount += amount;
+    }
+  }
+
+  return stats;
+}
+
 export function resolveClientIdForInvoice(
   clients: Client[],
   clientId: string,

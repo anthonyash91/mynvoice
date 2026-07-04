@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Send } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { EmptyState } from '@/components/EmptyState';
 import { InvoiceActionsMenu } from '@/components/InvoiceActionsMenu';
+import { InvoiceStatCards } from '@/components/InvoiceStatCards';
 import { ViewHeader } from '@/components/ViewHeader';
 import { StatusLabel } from '@/components/StatusLabel';
 import { Tooltip } from '@/components/Tooltip';
@@ -14,6 +15,7 @@ import {
   resolveStatus,
   isHistoricalInvoice,
   sortInvoices,
+  computeInvoiceDashboardStats,
   type InvoiceListSortDirection,
   type InvoiceListSortKey,
 } from '@/lib/invoice';
@@ -124,6 +126,8 @@ export function InvoicesView({
     [invoices, sortKey, sortDirection]
   );
 
+  const stats = useMemo(() => computeInvoiceDashboardStats(invoices), [invoices]);
+
   return (
     <div>
       <ViewHeader
@@ -141,7 +145,9 @@ export function InvoicesView({
         }
       />
 
-      <table className="w-full table-fixed text-[13px]">
+      <InvoiceStatCards stats={stats} />
+
+      <table className="w-full table-fixed text-[13px] mt-4">
         <colgroup>
           {Array.from({ length: 9 }, (_, index) => (
             <col key={index} />
