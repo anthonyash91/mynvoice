@@ -1,4 +1,5 @@
-import { Send } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, Send } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { EmptyState } from '@/components/EmptyState';
 import { InvoiceActionsMenu } from '@/components/InvoiceActionsMenu';
@@ -7,7 +8,15 @@ import { StatusLabel } from '@/components/StatusLabel';
 import { Tooltip } from '@/components/Tooltip';
 import { calculateTotal, formatCurrency, formatDate } from '@/lib/calculations';
 import { invoiceEmailSentTooltip } from '@/lib/emailTemplates';
-import { invoiceDueDisplay, invoiceReminderDisplay, resolveStatus, isHistoricalInvoice, compareInvoicesForList } from '@/lib/invoice';
+import {
+  invoiceDueDisplay,
+  invoiceReminderDisplay,
+  resolveStatus,
+  isHistoricalInvoice,
+  sortInvoices,
+  type InvoiceListSortDirection,
+  type InvoiceListSortKey,
+} from '@/lib/invoice';
 import {
   tableRowHoverClass,
   tableTdClass,
@@ -37,6 +46,52 @@ interface InvoicesViewProps {
   onDeleteInvoice: (id: string) => Promise<void>;
 }
 
+function defaultDirectionForSortKey(key: InvoiceListSortKey): InvoiceListSortDirection {
+  return key === 'date' || key === 'amount' ? 'desc' : 'asc';
+}
+
+interface SortableHeaderProps {
+  label: string;
+  sortKey: InvoiceListSortKey;
+  activeKey: InvoiceListSortKey;
+  direction: InvoiceListSortDirection;
+  onSort: (key: InvoiceListSortKey) => void;
+  className?: string;
+}
+
+function SortableHeader({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onSort,
+  className,
+}: SortableHeaderProps) {
+  const active = activeKey === sortKey;
+
+  return (
+    <th className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          'inline-flex items-center gap-1 rounded-sm transition-colors',
+          'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          active && 'text-foreground'
+        )}
+      >
+        <span>{label}</span>
+        {active &&
+          (direction === 'asc' ? (
+            <ArrowUp className="h-3 w-3 shrink-0" aria-hidden="true" />
+          ) : (
+            <ArrowDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+          ))}
+      </button>
+    </th>
+  );
+}
+
 export function InvoicesView({
   invoices,
   clients,
@@ -52,7 +107,22 @@ export function InvoicesView({
   onVisitPublicInvoice,
   onDeleteInvoice,
 }: InvoicesViewProps) {
-  const rows = [...invoices].sort(compareInvoicesForList);
+  const [sortKey, setSortKey] = useState<InvoiceListSortKey>('date');
+  const [sortDirection, setSortDirection] = useState<InvoiceListSortDirection>('desc');
+
+  const handleSort = (key: InvoiceListSortKey) => {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(defaultDirectionForSortKey(key));
+  };
+
+  const rows = useMemo(
+    () => sortInvoices(invoices, sortKey, sortDirection),
+    [invoices, sortKey, sortDirection]
+  );
 
   return (
     <div>
@@ -79,10 +149,38 @@ export function InvoicesView({
         </colgroup>
         <thead>
           <tr className="text-muted-foreground border-b border-border">
-            <th className={cn(tableThClass, 'pl-8')}>Client</th>
-            <th className={tableThClass}>Invoice</th>
-            <th className={tableThClass}>Date</th>
-            <th className={tableThClass}>Amount</th>
+            <SortableHeader
+              label="Client"
+              sortKey="client"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+              className={cn(tableThClass, 'pl-8')}
+            />
+            <SortableHeader
+              label="Invoice"
+              sortKey="number"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+              className={tableThClass}
+            />
+            <SortableHeader
+              label="Date"
+              sortKey="date"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+              className={tableThClass}
+            />
+            <SortableHeader
+              label="Amount"
+              sortKey="amount"
+              activeKey={sortKey}
+              direction={sortDirection}
+              onSort={handleSort}
+              className={tableThClass}
+            />
             <th className={tableThClass}>Due</th>
             <th className={tableThClass}>Sent</th>
             <th className={tableThClass}>Reminder</th>

@@ -1,4 +1,4 @@
-import { formatDate, formatDateLong } from '@/lib/calculations';
+import { calculateTotal, formatDate, formatDateLong } from '@/lib/calculations';
 import { isHistoricalInvoice } from '@/lib/historicalInvoice';
 import type {
   Client,
@@ -37,16 +37,53 @@ export function compareInvoiceNumbers(a: string, b: string): number {
   return left.raw.localeCompare(right.raw);
 }
 
+export type InvoiceListSortKey = 'client' | 'number' | 'date' | 'amount';
+export type InvoiceListSortDirection = 'asc' | 'desc';
+
+function applyDirection(value: number, direction: InvoiceListSortDirection): number {
+  return direction === 'asc' ? value : -value;
+}
+
+export function sortInvoices(
+  invoices: Invoice[],
+  key: InvoiceListSortKey,
+  direction: InvoiceListSortDirection
+): Invoice[] {
+  return [...invoices].sort((a, b) => {
+    let cmp = 0;
+
+    switch (key) {
+      case 'client':
+        cmp = a.clientName.localeCompare(b.clientName, undefined, { sensitivity: 'base' });
+        break;
+      case 'number':
+        cmp = compareInvoiceNumbers(a.number, b.number);
+        break;
+      case 'date':
+        cmp = a.issueDate.localeCompare(b.issueDate);
+        break;
+      case 'amount': {
+        const aTotal = calculateTotal(a.lineItems, a.taxEnabled, a.taxRate).total;
+        const bTotal = calculateTotal(b.lineItems, b.taxEnabled, b.taxRate).total;
+        cmp = aTotal - bTotal;
+        break;
+      }
+    }
+
+    if (cmp !== 0) return applyDirection(cmp, direction);
+
+    if (key !== 'date') {
+      const dateCmp = b.issueDate.localeCompare(a.issueDate);
+      if (dateCmp !== 0) return dateCmp;
+    }
+    if (key !== 'number') {
+      return compareInvoiceNumbers(b.number, a.number);
+    }
+    return 0;
+  });
+}
+
 export function compareInvoicesForList(a: Invoice, b: Invoice): number {
-  const aHistorical = isHistoricalInvoice(a);
-  const bHistorical = isHistoricalInvoice(b);
-
-  if (aHistorical && bHistorical) {
-    const dateCmp = a.issueDate.localeCompare(b.issueDate);
-    if (dateCmp !== 0) return dateCmp;
-    return compareInvoiceNumbers(a.number, b.number);
-  }
-
   const dateCmp = b.issueDate.localeCompare(a.issueDate);
   if (dateCmp !== 0) return dateCmp;
   return compareInvoiceNumbers(b.number, a.number);
