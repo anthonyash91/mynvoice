@@ -7,6 +7,7 @@ import { InvoicePanel } from '@/components/InvoicePanel';
 import { EditClientPanel } from '@/components/EditClientPanel';
 import { NewClientPanel } from '@/components/NewClientPanel';
 import { NewInvoicePanel } from '@/components/NewInvoicePanel';
+import { ImportHistoricalInvoicePanel } from '@/components/ImportHistoricalInvoicePanel';
 import { InvoicesView } from '@/views/InvoicesView';
 import { ClientsView } from '@/views/ClientsView';
 import { SettingsView } from '@/views/SettingsView';
@@ -67,6 +68,9 @@ function AppShell() {
     sendInvoice,
     visitPublicInvoice,
     deleteInvoice,
+    importHistoricalInvoice,
+    updateHistoricalInvoice,
+    bulkImportHistoricalInvoices,
     getClientInvoiceCount,
     addCalendarEntry,
     updateCalendarEntry,
@@ -131,15 +135,28 @@ function AppShell() {
 
   const openInvoice = useCallback((id: string) => setPanel({ kind: 'invoice', id }), [setPanel]);
   const openEditInvoice = useCallback(
-    (id: string) => setPanel({ kind: 'edit-invoice', id }),
-    [setPanel]
+    (id: string) => {
+      const invoice = data.invoices.find((item) => item.id === id);
+      if (invoice?.isHistorical) {
+        setPanel({ kind: 'edit-historical', id });
+        return;
+      }
+      setPanel({ kind: 'edit-invoice', id });
+    },
+    [setPanel, data.invoices]
   );
   const openClient = useCallback((id: string) => setPanel({ kind: 'edit-client', id }), [setPanel]);
   const openNewClient = useCallback(() => setPanel({ kind: 'new-client' }), [setPanel]);
   const openNewInvoice = useCallback(() => setPanel({ kind: 'new-invoice' }), [setPanel]);
+  const openImportHistorical = useCallback(
+    () => setPanel({ kind: 'import-historical' }),
+    [setPanel]
+  );
 
   const panelInvoice =
-    panel?.kind === 'invoice' || panel?.kind === 'edit-invoice'
+    panel?.kind === 'invoice' ||
+    panel?.kind === 'edit-invoice' ||
+    panel?.kind === 'edit-historical'
       ? data.invoices.find((i) => i.id === panel.id)
       : undefined;
 
@@ -198,6 +215,7 @@ function AppShell() {
               lateReminderIntervalDays={data.settings.lateReminderIntervalDays}
               onOpenInvoice={openInvoice}
               onNewInvoice={openNewInvoice}
+              onImportHistorical={openImportHistorical}
               onEditInvoice={openEditInvoice}
               onChangeInvoiceStatus={updateInvoiceStatus}
               onSendInvoice={sendInvoice}
@@ -364,6 +382,32 @@ function AppShell() {
                 onAddCalendarEntry={addCalendarEntry}
                 onUpdateCalendarEntry={updateCalendarEntry}
                 onDeleteCalendarEntry={deleteCalendarEntry}
+              />
+            )}
+            {panel.kind === 'import-historical' && (
+              <ImportHistoricalInvoicePanel
+                clients={data.clients}
+                onClose={() => setPanel(null)}
+                onImport={async (input) => {
+                  const saved = await importHistoricalInvoice(input);
+                  setPanel({ kind: 'invoice', id: saved.id });
+                  return saved;
+                }}
+                onBulkImport={bulkImportHistoricalInvoices}
+              />
+            )}
+            {panel.kind === 'edit-historical' && panelInvoice && (
+              <ImportHistoricalInvoicePanel
+                clients={data.clients}
+                editingInvoice={panelInvoice}
+                onClose={() => setPanel({ kind: 'invoice', id: panelInvoice.id })}
+                onImport={importHistoricalInvoice}
+                onUpdate={async (invoiceId, input) => {
+                  const saved = await updateHistoricalInvoice(invoiceId, input);
+                  setPanel({ kind: 'invoice', id: saved.id });
+                  return saved;
+                }}
+                onBulkImport={bulkImportHistoricalInvoices}
               />
             )}
           </AppPanel>

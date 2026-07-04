@@ -24,7 +24,7 @@ import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
 import { StatusIcon } from '@/components/StatusLabel';
 import { invoiceEmailRecipients, validateInvoiceEmail } from '@/lib/email';
 import { formatUnknownError } from '@/lib/errors';
-import { INVOICE_STORED_STATUSES, resolveStatus, statusLabel } from '@/lib/invoice';
+import { INVOICE_STORED_STATUSES, isHistoricalInvoice, resolveStatus, statusLabel } from '@/lib/invoice';
 import { downloadInvoicePdf } from '@/lib/pdf';
 import { cn } from '@/lib/utils';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
@@ -172,6 +172,7 @@ export function InvoiceActionsMenu({
 
   const isFirstSend = invoice.emailSendCount === 0;
   const canSendReminder = invoice.status === 'unpaid';
+  const historical = isHistoricalInvoice(invoice);
 
   useEffect(() => {
     onErrorsChange?.({
@@ -388,42 +389,46 @@ export function InvoiceActionsMenu({
               Edit
             </button>
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => sendWithPurpose('invoice')}
-              disabled={Boolean(sendingAction) || Boolean(sendValidationError)}
-              title={
-                sendValidationError ??
-                `${isFirstSend ? 'Send' : 'Resend'} to ${recipientSummary ?? 'client'}`
-              }
-              className={cn(
-                menuItemClass,
-                sentAction === 'invoice' ? 'text-[#34C759]' : 'text-foreground'
-              )}
-            >
-              {renderSentState('invoice', isFirstSend ? 'Send invoice' : 'Resend invoice')}
-            </button>
+            {!historical && (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => sendWithPurpose('invoice')}
+                  disabled={Boolean(sendingAction) || Boolean(sendValidationError)}
+                  title={
+                    sendValidationError ??
+                    `${isFirstSend ? 'Send' : 'Resend'} to ${recipientSummary ?? 'client'}`
+                  }
+                  className={cn(
+                    menuItemClass,
+                    sentAction === 'invoice' ? 'text-[#34C759]' : 'text-foreground'
+                  )}
+                >
+                  {renderSentState('invoice', isFirstSend ? 'Send invoice' : 'Resend invoice')}
+                </button>
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => sendWithPurpose('reminder')}
-              disabled={
-                Boolean(sendingAction) || !canSendReminder || Boolean(sendValidationError)
-              }
-              title={
-                !canSendReminder
-                  ? 'Reminders are available for unpaid invoices.'
-                  : (sendValidationError ?? `Send reminder to ${recipientSummary ?? 'client'}`)
-              }
-              className={cn(
-                menuItemClass,
-                sentAction === 'reminder' ? 'text-[#34C759]' : 'text-foreground'
-              )}
-            >
-              {renderSentState('reminder', 'Send reminder')}
-            </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => sendWithPurpose('reminder')}
+                  disabled={
+                    Boolean(sendingAction) || !canSendReminder || Boolean(sendValidationError)
+                  }
+                  title={
+                    !canSendReminder
+                      ? 'Reminders are available for unpaid invoices.'
+                      : (sendValidationError ?? `Send reminder to ${recipientSummary ?? 'client'}`)
+                  }
+                  className={cn(
+                    menuItemClass,
+                    sentAction === 'reminder' ? 'text-[#34C759]' : 'text-foreground'
+                  )}
+                >
+                  {renderSentState('reminder', 'Send reminder')}
+                </button>
+              </>
+            )}
 
             <button
               type="button"
@@ -435,15 +440,17 @@ export function InvoiceActionsMenu({
               Download invoice
             </button>
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => void handleVisitPublic()}
-              className={cn(menuItemClass, 'text-foreground')}
-            >
-              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-              Visit public invoice
-            </button>
+            {!historical && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void handleVisitPublic()}
+                className={cn(menuItemClass, 'text-foreground')}
+              >
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                Visit public invoice
+              </button>
+            )}
 
             {onDelete && (
               <>

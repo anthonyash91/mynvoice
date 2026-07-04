@@ -47,6 +47,7 @@ create table if not exists public.invoices (
   reminder_snooze_until date,
   reminder_interval_days_override integer,
   late_reminder_interval_days_override integer,
+  is_historical boolean not null default false,
   created_at date not null default current_date,
   unique (user_id, client_id, number)
 );

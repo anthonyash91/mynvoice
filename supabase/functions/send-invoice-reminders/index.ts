@@ -36,10 +36,15 @@ const corsHeaders = {
 };
 
 const INVOICE_SELECT =
-  'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, email_send_count, last_email_sent_at, last_email_sent_kind, reminders_paused, reminder_snooze_until, reminder_interval_days_override, late_reminder_interval_days_override';
+  'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, email_send_count, last_email_sent_at, last_email_sent_kind, reminders_paused, reminder_snooze_until, reminder_interval_days_override, late_reminder_interval_days_override, is_historical';
 
 const INVOICE_SELECT_LEGACY =
   'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, email_send_count, last_email_sent_at, last_email_sent_kind';
+
+function isMissingHistoricalColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('is_historical');
+}
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -285,8 +290,18 @@ async function fetchDueInvoices(
     .from('invoices')
     .select(INVOICE_SELECT)
     .eq('status', status)
+    .eq('is_historical', false)
     .gt('email_send_count', 0)
     .not('last_email_sent_at', 'is', null);
+
+  if (result.error && isMissingHistoricalColumnError(result.error)) {
+    result = await supabase
+      .from('invoices')
+      .select(INVOICE_SELECT)
+      .eq('status', status)
+      .gt('email_send_count', 0)
+      .not('last_email_sent_at', 'is', null);
+  }
 
   if (result.error && isMissingReminderControlColumnError(result.error)) {
     result = await supabase

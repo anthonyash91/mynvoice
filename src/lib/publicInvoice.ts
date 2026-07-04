@@ -240,6 +240,7 @@ export function publicInvoiceToInvoice(
     lastEmailSentAt: null,
     lastEmailSentKind: null,
     ...emptyInvoiceReminderSettings(),
+    isHistorical: false,
     createdAt: invoice.createdAt,
   };
 }

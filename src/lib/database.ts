@@ -21,6 +21,8 @@ import type {
   RecurringLineItem,
   Invoice,
   InvoiceDraft,
+  HistoricalInvoiceInput,
+  BulkHistoricalImportResult,
   InvoiceReminderSettings,
   LineItem,
   EmailHistoryEntry,
@@ -128,10 +130,14 @@ interface DbInvoice {
   reminder_snooze_until?: string | null;
   reminder_interval_days_override?: number | null;
   late_reminder_interval_days_override?: number | null;
+  is_historical?: boolean;
   created_at: string;
 }
 
 const INVOICE_SELECT =
+  'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, paid_at, email_send_count, last_email_sent_at, last_email_sent_kind, reminders_paused, reminder_snooze_until, reminder_interval_days_override, late_reminder_interval_days_override, is_historical, created_at';
+
+const INVOICE_SELECT_NO_HISTORICAL =
   'id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, paid_at, email_send_count, last_email_sent_at, last_email_sent_kind, reminders_paused, reminder_snooze_until, reminder_interval_days_override, late_reminder_interval_days_override, created_at';
 
 const INVOICE_SELECT_TOKEN =
@@ -218,6 +224,11 @@ export async function insertEmailHistory(
   return toEmailHistoryEntry(data as DbEmailHistory);
 }
 
+function isMissingHistoricalColumnError(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('is_historical');
+}
+
 function isMissingReminderControlColumnError(error: { message?: string } | null): boolean {
   const message = error?.message?.toLowerCase() ?? '';
   return (
@@ -247,6 +258,9 @@ async function selectInvoicesForUser(userId: string, invoiceId?: string) {
   };
 
   let result = await run(INVOICE_SELECT);
+  if (result.error && isMissingHistoricalColumnError(result.error)) {
+    result = await run(INVOICE_SELECT_NO_HISTORICAL);
+  }
   if (result.error && isMissingReminderControlColumnError(result.error)) {
     result = await run(INVOICE_SELECT_TOKEN);
   }
@@ -519,6 +533,7 @@ function toInvoice(row: DbInvoice): Invoice {
       row.late_reminder_interval_days_override != null
         ? Number(row.late_reminder_interval_days_override)
         : null,
+    isHistorical: row.is_historical === true,
     createdAt: row.created_at,
   };
 }
@@ -661,6 +676,7 @@ function draftToInvoice(
     lastEmailSentAt: null,
     lastEmailSentKind: null,
     ...emptyInvoiceReminderSettings(),
+    isHistorical: false,
     createdAt,
   };
 }
@@ -1096,6 +1112,201 @@ export async function saveInvoice(
   };
 }
 
+function historicalInvoiceToRow(
+  userId: string,
+  input: HistoricalInvoiceInput,
+  id: string
+): Record<string, unknown> {
+  return {
+    user_id: userId,
+    id,
+    client_id: input.clientId || null,
+    client_name: input.clientName,
+    number: input.number,
+    issue_date: input.issueDate,
+    due_date: input.dueDate,
+    line_items: input.lineItems,
+    notes: input.notes,
+    tax_enabled: input.taxEnabled,
+    tax_rate: input.taxRate,
+    status: input.status,
+    is_historical: true,
+    public_token: null,
+    owner_confirm_token: null,
+    paid_at: input.status === 'paid' ? input.paidAt : null,
+    email_send_count: 0,
+    last_email_sent_at: null,
+    last_email_sent_kind: null,
+    reminders_paused: true,
+    reminder_snooze_until: null,
+    reminder_interval_days_override: null,
+    late_reminder_interval_days_override: null,
+    created_at: input.createdAt ?? input.issueDate,
+  };
+}
+
+async function persistHistoricalInvoiceRow(
+  userId: string,
+  input: HistoricalInvoiceInput,
+  existingId?: string
+): Promise<Invoice> {
+  const row = historicalInvoiceToRow(userId, input, existingId ?? crypto.randomUUID());
+  const id = String(row.id);
+
+  if (existingId) {
+    let result = await supabase
+      .from('invoices')
+      .update(row)
+      .eq('user_id', userId)
+      .eq('id', id)
+      .select(INVOICE_SELECT)
+      .single();
+
+    if (result.error && isMissingHistoricalColumnError(result.error)) {
+      delete row.is_historical;
+      result = await supabase
+        .from('invoices')
+        .update(row)
+        .eq('user_id', userId)
+        .eq('id', id)
+        .select(INVOICE_SELECT_NO_HISTORICAL)
+        .single();
+    }
+
+    if (result.error) throw result.error;
+    return toInvoice(result.data as unknown as DbInvoice);
+  }
+
+  let result = await supabase.from('invoices').insert(row).select(INVOICE_SELECT).single();
+
+  if (result.error && isMissingHistoricalColumnError(result.error)) {
+    delete row.is_historical;
+    result = await supabase
+      .from('invoices')
+      .insert(row)
+      .select(INVOICE_SELECT_NO_HISTORICAL)
+      .single();
+  }
+
+  if (result.error) throw result.error;
+  return toInvoice(result.data as unknown as DbInvoice);
+}
+
+export async function importHistoricalInvoice(
+  userId: string,
+  input: HistoricalInvoiceInput
+): Promise<{ invoice: Invoice; newClient?: Client }> {
+  const draft: InvoiceDraft = {
+    clientId: input.clientId,
+    clientName: input.clientName,
+    number: input.number,
+    issueDate: input.issueDate,
+    dueDate: input.dueDate,
+    lineItems: input.lineItems,
+    notes: input.notes,
+    taxEnabled: input.taxEnabled,
+    taxRate: input.taxRate,
+  };
+
+  const { clientId, newClient } = await resolveInvoiceClientId(userId, draft);
+
+  let byNumberQuery = supabase
+    .from('invoices')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('number', input.number);
+
+  byNumberQuery = clientId
+    ? byNumberQuery.eq('client_id', clientId)
+    : byNumberQuery.is('client_id', null);
+
+  const byNumber = await byNumberQuery.maybeSingle();
+  if (byNumber.error) throw byNumber.error;
+  if (byNumber.data) {
+    throw new Error(`Invoice ${input.number} already exists for this client.`);
+  }
+
+  const invoice = await persistHistoricalInvoiceRow(userId, { ...input, clientId });
+  return { invoice, newClient };
+}
+
+export async function updateHistoricalInvoice(
+  userId: string,
+  invoiceId: string,
+  input: HistoricalInvoiceInput
+): Promise<{ invoice: Invoice; newClient?: Client }> {
+  const existing = await refetchInvoice(userId, invoiceId);
+  if (!existing.isHistorical) {
+    throw new Error('Only historical invoices can be updated here.');
+  }
+
+  const draft: InvoiceDraft = {
+    clientId: input.clientId,
+    clientName: input.clientName,
+    number: input.number,
+    issueDate: input.issueDate,
+    dueDate: input.dueDate,
+    lineItems: input.lineItems,
+    notes: input.notes,
+    taxEnabled: input.taxEnabled,
+    taxRate: input.taxRate,
+  };
+
+  const { clientId, newClient } = await resolveInvoiceClientId(userId, draft);
+
+  if (input.number !== existing.number || clientId !== existing.clientId) {
+    let byNumberQuery = supabase
+      .from('invoices')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('number', input.number)
+      .neq('id', invoiceId);
+
+    byNumberQuery = clientId
+      ? byNumberQuery.eq('client_id', clientId)
+      : byNumberQuery.is('client_id', null);
+
+    const byNumber = await byNumberQuery.maybeSingle();
+    if (byNumber.error) throw byNumber.error;
+    if (byNumber.data) {
+      throw new Error(`Invoice ${input.number} already exists for this client.`);
+    }
+  }
+
+  const invoice = await persistHistoricalInvoiceRow(
+    userId,
+    { ...input, clientId },
+    invoiceId
+  );
+  return { invoice, newClient };
+}
+
+export async function bulkImportHistoricalInvoices(
+  userId: string,
+  inputs: HistoricalInvoiceInput[]
+): Promise<BulkHistoricalImportResult> {
+  const imported: Invoice[] = [];
+  const newClients: Client[] = [];
+  const errors: string[] = [];
+  const seenNewClients = new Set<string>();
+
+  for (const input of inputs) {
+    try {
+      const { invoice, newClient } = await importHistoricalInvoice(userId, input);
+      imported.push(invoice);
+      if (newClient && !seenNewClients.has(newClient.id)) {
+        seenNewClients.add(newClient.id);
+        newClients.push(newClient);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Import failed.';
+      errors.push(`${input.number} (${input.clientName}): ${message}`);
+    }
+  }
+
+  return { imported, newClients, errors };
+}
+
 export async function updateInvoiceReminderSettingsRow(
   userId: string,
   invoiceId: string,
@@ -1231,6 +1442,9 @@ export async function ensureInvoicePublicToken(
   if (!row) throw new Error('Invoice not found');
 
   const current = toInvoice(row as unknown as DbInvoice);
+  if (current.isHistorical) {
+    throw new Error('Historical invoices do not have public payment links.');
+  }
   if (current.publicToken) {
     return current;
   }

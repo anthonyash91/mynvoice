@@ -7,6 +7,7 @@ import { formatDateLong } from '@/lib/calculations';
 import {
   automaticRemindersBlocked,
   invoiceReminderDisplay,
+  isHistoricalInvoice,
   localTodayDateString,
   resolveReminderIntervals,
 } from '@/lib/invoice';
@@ -34,6 +35,14 @@ export function InvoiceReminderControls({
 }: InvoiceReminderControlsProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (isHistoricalInvoice(invoice)) {
+    return (
+      <div className="border-b border-border px-6 py-4 text-[13px] text-muted-foreground">
+        Historical import — emails and automated reminders are permanently disabled.
+      </div>
+    );
+  }
 
   if (invoice.status !== 'unpaid' && invoice.status !== 'overdue') {
     return null;

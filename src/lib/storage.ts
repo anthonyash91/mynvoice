@@ -135,6 +135,7 @@ function seedData(): AppData {
         lastEmailSentAt: daysFromNow(-32) + 'T14:30:00.000Z',
         lastEmailSentKind: 'payment_received',
         ...emptyInvoiceReminderSettings(),
+        isHistorical: false,
         createdAt: daysFromNow(-45),
       },
       {
@@ -158,6 +159,7 @@ function seedData(): AppData {
         lastEmailSentAt: daysFromNow(-18) + 'T09:15:00.000Z',
         lastEmailSentKind: 'unpaid',
         ...emptyInvoiceReminderSettings(),
+        isHistorical: false,
         createdAt: daysFromNow(-20),
       },
       {
@@ -181,6 +183,7 @@ function seedData(): AppData {
         lastEmailSentAt: null,
         lastEmailSentKind: null,
         ...emptyInvoiceReminderSettings(),
+        isHistorical: false,
       },
       {
         id: 'inv4',
@@ -202,6 +205,7 @@ function seedData(): AppData {
         lastEmailSentAt: null,
         lastEmailSentKind: null,
         ...emptyInvoiceReminderSettings(),
+        isHistorical: false,
         createdAt: today(),
       },
     ],

@@ -419,6 +419,16 @@ async function markInvoicePaidAndNotifyClient(input: {
   settings: Record<string, unknown>;
   clientRow: Record<string, unknown> | null;
 }): Promise<void> {
+  if (input.invoice.is_historical === true) {
+    const paidAt = new Date().toISOString().split('T')[0];
+    const { error: updateError } = await input.supabase
+      .from('invoices')
+      .update({ status: 'paid', paid_at: paidAt })
+      .eq('id', input.invoice.id);
+    if (updateError) throw updateError;
+    return;
+  }
+
   const paidAt = new Date().toISOString().split('T')[0];
   const { error: updateError } = await input.supabase
     .from('invoices')

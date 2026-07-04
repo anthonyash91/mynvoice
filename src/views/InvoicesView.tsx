@@ -1,4 +1,5 @@
 import { Send } from 'lucide-react';
+import { Button } from '@/components/Button';
 import { EmptyState } from '@/components/EmptyState';
 import { InvoiceActionsMenu } from '@/components/InvoiceActionsMenu';
 import { ViewHeader } from '@/components/ViewHeader';
@@ -6,7 +7,7 @@ import { StatusLabel } from '@/components/StatusLabel';
 import { Tooltip } from '@/components/Tooltip';
 import { calculateTotal, formatCurrency, formatDate } from '@/lib/calculations';
 import { invoiceEmailSentTooltip } from '@/lib/emailTemplates';
-import { invoiceDueDisplay, invoiceReminderDisplay, resolveStatus } from '@/lib/invoice';
+import { invoiceDueDisplay, invoiceReminderDisplay, resolveStatus, isHistoricalInvoice } from '@/lib/invoice';
 import {
   tableRowHoverClass,
   tableTdClass,
@@ -24,6 +25,7 @@ interface InvoicesViewProps {
   lateReminderIntervalDays: number;
   onOpenInvoice: (id: string) => void;
   onNewInvoice: () => void;
+  onImportHistorical: () => void;
   onEditInvoice: (id: string) => void;
   onChangeInvoiceStatus: (id: string, status: InvoiceStoredStatus) => Promise<void>;
   onSendInvoice: (
@@ -43,6 +45,7 @@ export function InvoicesView({
   lateReminderIntervalDays,
   onOpenInvoice,
   onNewInvoice,
+  onImportHistorical,
   onEditInvoice,
   onChangeInvoiceStatus,
   onSendInvoice,
@@ -55,7 +58,20 @@ export function InvoicesView({
 
   return (
     <div>
-      <ViewHeader title="Invoices" subtitle={`${rows.length} total`} />
+      <ViewHeader
+        title="Invoices"
+        subtitle={`${rows.length} total`}
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onImportHistorical}>
+              Import historical
+            </Button>
+            <Button variant="primary" size="sm" onClick={onNewInvoice}>
+              New invoice
+            </Button>
+          </div>
+        }
+      />
 
       <table className="w-full table-fixed text-[13px]">
         <colgroup>
@@ -93,12 +109,17 @@ export function InvoicesView({
               const client = clients.find((item) => item.id === inv.clientId) ?? null;
               const status = resolveStatus(inv);
               const { total } = calculateTotal(inv.lineItems, inv.taxEnabled, inv.taxRate);
-              const sentTooltip = invoiceEmailSentTooltip(
-                inv.emailSendCount,
-                inv.lastEmailSentAt,
-                inv.lastEmailSentKind
-              );
-              const sentCount = (
+              const historical = isHistoricalInvoice(inv);
+              const sentTooltip = historical
+                ? 'Historical import — never sent from MyNvoice.'
+                : invoiceEmailSentTooltip(
+                    inv.emailSendCount,
+                    inv.lastEmailSentAt,
+                    inv.lastEmailSentKind
+                  );
+              const sentCount = historical ? (
+                <span className="text-muted-foreground">—</span>
+              ) : (
                 <span
                   className={cn(
                     'inline-flex max-w-full items-center gap-1 truncate',
@@ -136,7 +157,12 @@ export function InvoicesView({
                   onClick={() => onOpenInvoice(inv.id)}
                   className={tableRowHoverClass}
                 >
-                  <td className={cn(tableTdClass, 'pl-8')}>{inv.clientName}</td>
+                  <td className={cn(tableTdClass, 'pl-8')}>
+                    <span className="block truncate">{inv.clientName}</span>
+                    {historical && (
+                      <span className="text-[11px] text-muted-foreground">Historical</span>
+                    )}
+                  </td>
                   <td className={cn(tableTdClass, 'font-mono text-muted-foreground')}>{inv.number}</td>
                   <td className={cn(tableTdClass, 'text-muted-foreground')}>
                     {formatDate(inv.issueDate)}

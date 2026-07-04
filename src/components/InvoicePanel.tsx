@@ -5,7 +5,7 @@ import { InvoiceActionsMenu } from '@/components/InvoiceActionsMenu';
 import { InvoiceReminderControls } from '@/components/InvoiceReminderControls';
 import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
 import { StatusLabel } from '@/components/StatusLabel';
-import { resolveStatus } from '@/lib/invoice';
+import { resolveStatus, isHistoricalInvoice } from '@/lib/invoice';
 import type {
   Client,
   Invoice,
@@ -43,6 +43,7 @@ export function InvoicePanel({
 }: InvoicePanelProps) {
   const confirm = useConfirm();
   const status = resolveStatus(invoice);
+  const historical = isHistoricalInvoice(invoice);
   const [deleting, setDeleting] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -130,6 +131,11 @@ export function InvoicePanel({
             {!sendError && !actionError && sendValidationError && (
               <p className="text-muted-foreground">{sendValidationError}</p>
             )}
+          </div>
+        )}
+        {historical && (
+          <div className="px-6 pb-3 text-[12px] text-muted-foreground">
+            Historical record — no emails will be sent for this invoice.
           </div>
         )}
       </div>

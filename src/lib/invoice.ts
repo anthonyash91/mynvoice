@@ -1,4 +1,5 @@
 import { formatDate, formatDateLong } from '@/lib/calculations';
+import { isHistoricalInvoice } from '@/lib/historicalInvoice';
 import type {
   Client,
   Invoice,
@@ -327,6 +328,13 @@ export function invoiceReminderDisplay(
     client?: Pick<Client, 'reminderIntervalDays' | 'lateReminderIntervalDays'> | null;
   }
 ): { label: string; tooltip: string } {
+  if (isHistoricalInvoice(invoice)) {
+    return {
+      label: '—',
+      tooltip: 'Historical import — emails are permanently disabled for this invoice.',
+    };
+  }
+
   const now = options?.now ?? Date.now();
   const client = options?.client ?? null;
   const resolved = resolveReminderIntervals(invoice, intervals, client);
@@ -402,6 +410,8 @@ export function emptyInvoiceReminderSettings(): InvoiceReminderSettings {
     lateReminderIntervalDaysOverride: null,
   };
 }
+
+export { isHistoricalInvoice, historicalInvoiceLabel } from '@/lib/historicalInvoice';
 
 export function statusLabel(status: InvoiceStatus): string {
   const labels: Record<InvoiceStatus, string> = {

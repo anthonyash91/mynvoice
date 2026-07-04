@@ -8,6 +8,7 @@ import type {
   InvoiceDraft,
   InvoiceReminderSettings,
   Settings,
+  HistoricalInvoiceInput,
 } from '@/types';
 import { resolveSendTemplateKind } from '@/lib/email';
 import { resolveStatus } from '@/lib/invoice';
@@ -36,6 +37,9 @@ import {
   deleteInvoiceRow,
   ensureInvoicePublicToken,
   fetchAppData,
+  bulkImportHistoricalInvoices as bulkImportHistoricalInvoicesDb,
+  importHistoricalInvoice as importHistoricalInvoiceDb,
+  updateHistoricalInvoice as updateHistoricalInvoiceDb,
   insertCalendarEntry,
   updateCalendarEntryRow,
   importLocalData,
@@ -53,6 +57,7 @@ import { sendInvoiceWithPdf } from '@/lib/email';
 import { migrateEmailTemplates } from '@/lib/emailTemplates';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
 import { hasImportedLocalData, loadData, markLocalDataImported } from '@/lib/storage';
+import { parseHistoricalCsv } from '@/lib/historicalInvoice';
 
 function getErrorMessage(err: unknown): string {
   if (err && typeof err === 'object' && 'message' in err) {
@@ -342,6 +347,9 @@ export function useStore(user: User | null) {
       const snapshot = dataRef.current;
       const existing = snapshot.invoices.find((inv) => inv.id === invoiceId);
       if (!existing) throw new Error('Invoice not found');
+      if (existing.isHistorical) {
+        throw new Error('Historical invoices do not have public payment pages.');
+      }
 
       const invoice = existing.publicToken
         ? existing
@@ -402,6 +410,9 @@ export function useStore(user: User | null) {
       const snapshot = dataRef.current;
       const invoice = snapshot.invoices.find((inv) => inv.id === invoiceId);
       if (!invoice) throw new Error('Invoice not found');
+      if (invoice.isHistorical) {
+        throw new Error('Historical invoices cannot be emailed.');
+      }
 
       const client = snapshot.clients.find((item) => item.id === invoice.clientId);
       if (!client) throw new Error('Link this invoice to a client before sending.');
@@ -582,6 +593,64 @@ export function useStore(user: User | null) {
     [user]
   );
 
+  const importHistoricalInvoice = useCallback(
+    async (input: HistoricalInvoiceInput) => {
+      if (!user) throw new Error('Not signed in');
+      const { invoice, newClient } = await importHistoricalInvoiceDb(user.id, input);
+      setData((prev) => ({
+        ...prev,
+        invoices: [...prev.invoices, invoice],
+        clients:
+          newClient && !prev.clients.some((client) => client.id === newClient.id)
+            ? [...prev.clients, newClient]
+            : prev.clients,
+      }));
+      return invoice;
+    },
+    [user]
+  );
+
+  const updateHistoricalInvoice = useCallback(
+    async (invoiceId: string, input: HistoricalInvoiceInput) => {
+      if (!user) throw new Error('Not signed in');
+      const { invoice, newClient } = await updateHistoricalInvoiceDb(user.id, invoiceId, input);
+      setData((prev) => ({
+        ...prev,
+        invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? invoice : inv)),
+        clients:
+          newClient && !prev.clients.some((client) => client.id === newClient.id)
+            ? [...prev.clients, newClient]
+            : prev.clients,
+      }));
+      return invoice;
+    },
+    [user]
+  );
+
+  const bulkImportHistoricalInvoices = useCallback(
+    async (csvText: string) => {
+      if (!user) throw new Error('Not signed in');
+      const parsed = parseHistoricalCsv(csvText);
+      const result = await bulkImportHistoricalInvoicesDb(user.id, parsed.invoices);
+      setData((prev) => {
+        const importedIds = new Set(result.imported.map((invoice) => invoice.id));
+        const kept = prev.invoices.filter((invoice) => !importedIds.has(invoice.id));
+        const newClientIds = new Set(result.newClients.map((client) => client.id));
+        const clients = [
+          ...prev.clients.filter((client) => !newClientIds.has(client.id)),
+          ...result.newClients,
+        ];
+        return {
+          ...prev,
+          clients,
+          invoices: [...kept, ...result.imported],
+        };
+      });
+      return result;
+    },
+    [user]
+  );
+
   const ensureRecurringCalendarEntriesForMonth = useCallback(
     async (year: number, month: number) => {
       if (!user) return;
@@ -646,6 +715,9 @@ export function useStore(user: User | null) {
     sendInvoice,
     visitPublicInvoice,
     deleteInvoice,
+    importHistoricalInvoice,
+    updateHistoricalInvoice,
+    bulkImportHistoricalInvoices,
     getClientInvoiceCount,
     addCalendarEntry,
     updateCalendarEntry,

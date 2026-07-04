@@ -13,7 +13,9 @@ export type Panel =
   | { kind: 'edit-invoice'; id: string; from?: 'history' }
   | { kind: 'edit-client'; id: string }
   | { kind: 'new-client' }
-  | { kind: 'new-invoice' };
+  | { kind: 'new-invoice' }
+  | { kind: 'import-historical' }
+  | { kind: 'edit-historical'; id: string };
 
 export type CalendarEntryType = 'hourly' | 'fixed';
 
@@ -70,7 +72,29 @@ export interface Invoice {
   reminderSnoozeUntil: string | null;
   reminderIntervalDaysOverride: number | null;
   lateReminderIntervalDaysOverride: number | null;
+  isHistorical: boolean;
   createdAt: string;
+}
+
+export interface HistoricalInvoiceInput {
+  clientId: string;
+  clientName: string;
+  number: string;
+  issueDate: string;
+  dueDate: string | null;
+  lineItems: LineItem[];
+  notes: string;
+  taxEnabled: boolean;
+  taxRate: number;
+  status: InvoiceStoredStatus;
+  paidAt: string | null;
+  createdAt?: string;
+}
+
+export interface BulkHistoricalImportResult {
+  imported: Invoice[];
+  newClients: Client[];
+  errors: string[];
 }
 
 export interface InvoiceReminderSettings {
