@@ -17,9 +17,9 @@ function StatCard({ label, count, amount, amountClassName }: StatCardProps) {
   return (
     <div className="rounded-md border border-border bg-secondary/30 px-4 py-3 min-w-0">
       <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
-      <p className="mt-1.5 text-[24px] font-medium tabular-nums leading-none">{count}</p>
-      <p className={cn('mt-2 text-[13px] tabular-nums font-medium', amountClassName)}>
-        {formatCurrency(amount)}
+      <p className="mt-1.5 text-[24px] font-medium tabular-nums leading-none">
+        {count}{' '}
+        <span className={cn('text-[18px]', amountClassName)}>({formatCurrency(amount)})</span>
       </p>
     </div>
   );
