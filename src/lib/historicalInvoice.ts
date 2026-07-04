@@ -1,8 +1,29 @@
 import type { HistoricalInvoiceInput, InvoiceStoredStatus, LineItem } from '@/types';
 
-export const HISTORICAL_CSV_TEMPLATE = `client,number,issue_date,due_date,status,paid_date,description,quantity,rate,tax_rate,notes
-Mia Chen,INV-2019-001,2019-01-15,2019-02-15,paid,2019-02-10,Brand identity work,1,2400,0,
-Mia Chen,INV-2019-002,2019-03-01,2019-03-31,unpaid,,Website copy,8,175,0,Imported from previous app`;
+export const HISTORICAL_CSV_TEMPLATE = `client,number,issue_date,due_date,status,paid_date,description,amount,tax_rate,notes
+Mia Chen,INV-2019-001,2019-01-15,2019-02-15,paid,2019-02-10,Brand identity work,2400,0,
+Mia Chen,INV-2019-002,2019-03-01,2019-03-31,unpaid,,Website copy,1400,0,Imported from previous app`;
+
+export function newFixedHistoricalLineItem(description: string, amount: number): LineItem {
+  return {
+    id: crypto.randomUUID(),
+    description,
+    quantity: 1,
+    rate: amount,
+    entryType: 'fixed',
+  };
+}
+
+export function normalizeHistoricalLineItem(item: LineItem): LineItem {
+  const amount =
+    item.entryType === 'fixed' ? item.rate : Math.max(0, item.quantity) * Math.max(0, item.rate);
+  return {
+    ...item,
+    entryType: 'fixed',
+    quantity: 1,
+    rate: amount,
+  };
+}
 
 const HISTORICAL_STATUSES = new Set<InvoiceStoredStatus>([
   'paid',
@@ -109,13 +130,27 @@ function invoiceKey(client: string, number: string): string {
   return `${client.trim().toLowerCase()}::${number.trim().toLowerCase()}`;
 }
 
-function newLineItem(description: string, quantity: number, rate: number): LineItem {
-  return {
-    id: crypto.randomUUID(),
-    description,
-    quantity,
-    rate,
-  };
+function newLineItem(description: string, amount: number): LineItem {
+  return newFixedHistoricalLineItem(description, amount);
+}
+
+function resolveLineItemAmount(
+  read: (column: string) => string,
+  index: Record<string, number>,
+  rowNumber: number
+): number {
+  const headers = Object.keys(index);
+  if (headers.includes('amount')) {
+    return parseNumber(read('amount'), 'amount', rowNumber);
+  }
+
+  if (headers.includes('quantity') && headers.includes('rate')) {
+    const quantity = parseNumber(read('quantity'), 'quantity', rowNumber);
+    const rate = parseNumber(read('rate'), 'rate', rowNumber);
+    return quantity * rate;
+  }
+
+  throw new Error(`Row ${rowNumber}: amount is required (or legacy quantity and rate columns).`);
 }
 
 export type ParsedHistoricalCsv = {
@@ -131,11 +166,16 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
   }
 
   const headers = rows[0].map(normalizeHeader);
-  const required = ['client', 'number', 'issue_date', 'status', 'description', 'quantity', 'rate'];
+  const hasAmount = headers.includes('amount');
+  const hasLegacyQtyRate = headers.includes('quantity') && headers.includes('rate');
+  const required = ['client', 'number', 'issue_date', 'status', 'description'];
   for (const column of required) {
     if (!headers.includes(column)) {
       return { invoices: [], errors: [`Missing required column: ${column}`] };
     }
+  }
+  if (!hasAmount && !hasLegacyQtyRate) {
+    return { invoices: [], errors: ['Missing required column: amount'] };
   }
 
   const index = Object.fromEntries(headers.map((header, i) => [header, i]));
@@ -167,9 +207,8 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
       if (!number) throw new Error(`Row ${rowNumber}: number is required.`);
 
       const description = read('description').trim();
-      const quantity = parseNumber(read('quantity'), 'quantity', rowNumber);
-      const rate = parseNumber(read('rate'), 'rate', rowNumber);
       if (!description) throw new Error(`Row ${rowNumber}: description is required.`);
+      const amount = resolveLineItemAmount(read, index, rowNumber);
 
       const key = invoiceKey(clientName, number);
       let group = grouped.get(key);
@@ -203,7 +242,7 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
         grouped.set(key, group);
       }
 
-      group.lineItems.push(newLineItem(description, quantity, rate));
+      group.lineItems.push(newLineItem(description, amount));
     } catch (err) {
       errors.push(err instanceof Error ? err.message : `Row ${rowNumber}: Invalid row.`);
     }
@@ -237,6 +276,9 @@ export function validateHistoricalInput(input: HistoricalInvoiceInput): string |
   if (input.lineItems.length === 0) return 'Add at least one line item.';
   if (input.lineItems.some((item) => !item.description.trim())) {
     return 'Every line item needs a description.';
+  }
+  if (input.lineItems.some((item) => item.rate <= 0)) {
+    return 'Every line item needs an amount greater than zero.';
   }
   if (input.status === 'paid' && !input.paidAt) {
     return 'Paid date is required for paid invoices.';

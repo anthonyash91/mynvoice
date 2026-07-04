@@ -15,6 +15,8 @@ import { calculateTotal, formatCurrency } from '@/lib/calculations';
 import { clientInvoiceName } from '@/lib/client';
 import {
   HISTORICAL_CSV_TEMPLATE,
+  newFixedHistoricalLineItem,
+  normalizeHistoricalLineItem,
   parseHistoricalCsv,
   validateHistoricalInput,
 } from '@/lib/historicalInvoice';
@@ -38,12 +40,7 @@ const STATUS_OPTIONS: { value: InvoiceStoredStatus; label: string }[] = [
 ];
 
 function emptyLineItem(): LineItem {
-  return {
-    id: crypto.randomUUID(),
-    description: '',
-    quantity: 1,
-    rate: 0,
-  };
+  return newFixedHistoricalLineItem('', 0);
 }
 
 interface ImportHistoricalInvoicePanelProps {
@@ -74,7 +71,9 @@ export function ImportHistoricalInvoicePanel({
   const [status, setStatus] = useState<InvoiceStoredStatus>(editingInvoice?.status ?? 'paid');
   const [paidAt, setPaidAt] = useState(editingInvoice?.paidAt ?? '');
   const [lineItems, setLineItems] = useState<LineItem[]>(
-    editingInvoice?.lineItems.length ? editingInvoice.lineItems : [emptyLineItem()]
+    editingInvoice?.lineItems.length
+      ? editingInvoice.lineItems.map(normalizeHistoricalLineItem)
+      : [emptyLineItem()]
   );
   const [notes, setNotes] = useState(editingInvoice?.notes ?? '');
   const [taxEnabled, setTaxEnabled] = useState(editingInvoice?.taxEnabled ?? false);
@@ -97,7 +96,11 @@ export function ImportHistoricalInvoicePanel({
     setDueOn(Boolean(editingInvoice.dueDate));
     setStatus(editingInvoice.status);
     setPaidAt(editingInvoice.paidAt ?? '');
-    setLineItems(editingInvoice.lineItems.length ? editingInvoice.lineItems : [emptyLineItem()]);
+    setLineItems(
+      editingInvoice.lineItems.length
+        ? editingInvoice.lineItems.map(normalizeHistoricalLineItem)
+        : [emptyLineItem()]
+    );
     setNotes(editingInvoice.notes);
     setTaxEnabled(editingInvoice.taxEnabled);
     setTaxRate(editingInvoice.taxRate ? String(editingInvoice.taxRate) : '');
@@ -281,7 +284,10 @@ export function ImportHistoricalInvoicePanel({
               </Field>
             )}
 
-            <SectionHeader title="Line items" />
+            <SectionHeader
+              title="Line items"
+              description="Fixed amounts only — enter the total for each line."
+            />
             <div className="space-y-3">
               {lineItems.map((item) => (
                 <div key={item.id} className="rounded border border-border p-3 space-y-2">
@@ -290,24 +296,18 @@ export function ImportHistoricalInvoicePanel({
                     onChange={(value) => updateLineItem(item.id, { description: value })}
                     placeholder="Description"
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <TextInput
-                      type="number"
-                      value={item.quantity ? String(item.quantity) : ''}
-                      onChange={(value) =>
-                        updateLineItem(item.id, { quantity: value ? Number(value) : 0 })
-                      }
-                      placeholder="Qty"
-                    />
-                    <TextInput
-                      type="number"
-                      value={item.rate ? String(item.rate) : ''}
-                      onChange={(value) =>
-                        updateLineItem(item.id, { rate: value ? Number(value) : 0 })
-                      }
-                      placeholder="Rate"
-                    />
-                  </div>
+                  <TextInput
+                    type="number"
+                    value={item.rate ? String(item.rate) : ''}
+                    onChange={(value) =>
+                      updateLineItem(item.id, {
+                        entryType: 'fixed',
+                        quantity: 1,
+                        rate: value ? Number(value) : 0,
+                      })
+                    }
+                    placeholder="Amount"
+                  />
                   <div className="flex justify-end">
                     <button
                       type="button"
@@ -364,7 +364,7 @@ export function ImportHistoricalInvoicePanel({
           <>
             <Field
               label="CSV file"
-              hint="Required columns: client, number, issue_date, status, description, quantity, rate."
+              hint="Required columns: client, number, issue_date, status, description, amount."
             >
               <input
                 type="file"
