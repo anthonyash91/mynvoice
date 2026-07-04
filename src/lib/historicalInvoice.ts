@@ -1,4 +1,5 @@
 import type { HistoricalInvoiceInput, InvoiceStoredStatus, LineItem } from '@/types';
+import { compareInvoiceNumbers } from '@/lib/invoice';
 
 export const HISTORICAL_CSV_TEMPLATE = `client,number,issue_date,due_date,status,paid_date,description,amount,tax_rate,notes
 Mia Chen,INV-2019-001,2019-01-15,2019-02-15,paid,2019-02-10,Brand identity work,2400,0,
@@ -107,7 +108,49 @@ function normalizeHeader(value: string): string {
     .trim()
     .replace(/^\uFEFF/, '')
     .toLowerCase()
-    .replace(/\s+/g, '_');
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+}
+
+const HEADER_ALIASES: Record<string, string> = {
+  total: 'amount',
+  line_total: 'amount',
+  invoice_total: 'amount',
+  invoice_amount: 'amount',
+  subtotal: 'amount',
+  inv_number: 'number',
+  invoice_number: 'number',
+  invoice_no: 'number',
+  invoiceno: 'number',
+  customer: 'client',
+  client_name: 'client',
+  company: 'client',
+  issued: 'issue_date',
+  issued_date: 'issue_date',
+  invoice_date: 'issue_date',
+  due: 'due_date',
+  paid: 'paid_date',
+  payment_date: 'paid_date',
+  tax: 'tax_rate',
+};
+
+function canonicalHeader(header: string): string {
+  const normalized = normalizeHeader(header);
+  return HEADER_ALIASES[normalized] ?? normalized;
+}
+
+function buildHeaderIndex(rawHeaders: string[]): {
+  headers: string[];
+  index: Record<string, number>;
+} {
+  const index: Record<string, number> = {};
+  for (let i = 0; i < rawHeaders.length; i += 1) {
+    const canonical = canonicalHeader(rawHeaders[i]);
+    if (!(canonical in index)) {
+      index[canonical] = i;
+    }
+  }
+  return { headers: Object.keys(index), index };
 }
 
 function parseDate(value: string, field: string, rowNumber: number): string | null {
@@ -216,7 +259,7 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
     return { invoices: [], errors: ['CSV is empty.'] };
   }
 
-  const headers = rows[0].map(normalizeHeader);
+  const { headers, index } = buildHeaderIndex(rows[0]);
   const hasAmount = headers.includes('amount');
   const hasLegacyQtyRate = headers.includes('quantity') && headers.includes('rate');
   const required = ['client', 'number', 'issue_date', 'status', 'description'];
@@ -226,10 +269,14 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
     }
   }
   if (!hasAmount && !hasLegacyQtyRate) {
-    return { invoices: [], errors: ['Missing required column: amount'] };
+    return {
+      invoices: [],
+      errors: [
+        'Missing required column: amount. Use a single `amount` column for fixed invoice totals — quantity and rate are not required.',
+      ],
+    };
   }
 
-  const index = Object.fromEntries(headers.map((header, i) => [header, i]));
   const grouped = new Map<
     string,
     {
@@ -317,6 +364,12 @@ export function parseHistoricalCsv(text: string): ParsedHistoricalCsv {
       createdAt: group.createdAt,
     });
   }
+
+  invoices.sort((a, b) => {
+    const dateCmp = a.issueDate.localeCompare(b.issueDate);
+    if (dateCmp !== 0) return dateCmp;
+    return compareInvoiceNumbers(a.number, b.number);
+  });
 
   return { invoices, errors };
 }

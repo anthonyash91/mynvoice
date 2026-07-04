@@ -375,7 +375,7 @@ export function ImportHistoricalInvoicePanel({
           <>
             <Field
               label="CSV file"
-              hint="Required columns: client, number, issue_date, status, description, amount. Dates can be YYYY-MM-DD or M/D/YYYY."
+              hint="Required: client, number, issue_date, status, description, amount. Fixed invoices use one amount column — no quantity or rate needed."
             >
               <input
                 type="file"

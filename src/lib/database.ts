@@ -235,12 +235,18 @@ function formatImportError(err: unknown): string {
     if (message.includes('invoices_user_id_client_id_number_key')) {
       return 'An invoice with this number already exists for this client.';
     }
+    if (message.includes('due_date') && message.includes('not-null')) {
+      return 'Due date is required. Add due_date to your CSV or leave issue_date set so it can be used as a fallback.';
+    }
     return message;
   }
   if (typeof err === 'object' && err !== null && 'message' in err) {
     const message = String((err as { message: unknown }).message);
     if (message.includes('invoices_user_id_client_id_number_key')) {
       return 'An invoice with this number already exists for this client.';
+    }
+    if (message.includes('due_date') && message.includes('not-null')) {
+      return 'Due date is required. Add due_date to your CSV or leave issue_date set so it can be used as a fallback.';
     }
     return message;
   }
@@ -1142,7 +1148,7 @@ function historicalInvoiceToRow(
     client_name: input.clientName,
     number: input.number,
     issue_date: input.issueDate,
-    due_date: input.dueDate,
+    due_date: input.dueDate ?? input.issueDate,
     line_items: input.lineItems,
     notes: input.notes,
     tax_enabled: input.taxEnabled,

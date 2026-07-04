@@ -21,6 +21,37 @@ export function formatInvoiceNumber(n: number): string {
   return `INV-${String(n).padStart(3, '0')}`;
 }
 
+function invoiceNumberSortKey(number: string): { prefix: string; numeric: number; raw: string } {
+  const raw = number.trim();
+  const match = raw.match(/^(.*?)(\d+)$/);
+  if (!match) return { prefix: raw.toLowerCase(), numeric: 0, raw };
+  return { prefix: match[1].toLowerCase(), numeric: Number(match[2]), raw };
+}
+
+export function compareInvoiceNumbers(a: string, b: string): number {
+  const left = invoiceNumberSortKey(a);
+  const right = invoiceNumberSortKey(b);
+  const prefixCmp = left.prefix.localeCompare(right.prefix);
+  if (prefixCmp !== 0) return prefixCmp;
+  if (left.numeric !== right.numeric) return left.numeric - right.numeric;
+  return left.raw.localeCompare(right.raw);
+}
+
+export function compareInvoicesForList(a: Invoice, b: Invoice): number {
+  const aHistorical = isHistoricalInvoice(a);
+  const bHistorical = isHistoricalInvoice(b);
+
+  if (aHistorical && bHistorical) {
+    const dateCmp = a.issueDate.localeCompare(b.issueDate);
+    if (dateCmp !== 0) return dateCmp;
+    return compareInvoiceNumbers(a.number, b.number);
+  }
+
+  const dateCmp = b.issueDate.localeCompare(a.issueDate);
+  if (dateCmp !== 0) return dateCmp;
+  return compareInvoiceNumbers(b.number, a.number);
+}
+
 export function resolveClientIdForInvoice(
   clients: Client[],
   clientId: string,

@@ -7,7 +7,7 @@ import { StatusLabel } from '@/components/StatusLabel';
 import { Tooltip } from '@/components/Tooltip';
 import { calculateTotal, formatCurrency, formatDate } from '@/lib/calculations';
 import { invoiceEmailSentTooltip } from '@/lib/emailTemplates';
-import { invoiceDueDisplay, invoiceReminderDisplay, resolveStatus, isHistoricalInvoice } from '@/lib/invoice';
+import { invoiceDueDisplay, invoiceReminderDisplay, resolveStatus, isHistoricalInvoice, compareInvoicesForList } from '@/lib/invoice';
 import {
   tableRowHoverClass,
   tableTdClass,
@@ -52,9 +52,7 @@ export function InvoicesView({
   onVisitPublicInvoice,
   onDeleteInvoice,
 }: InvoicesViewProps) {
-  const rows = [...invoices].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  const rows = [...invoices].sort(compareInvoicesForList);
 
   return (
     <div>
