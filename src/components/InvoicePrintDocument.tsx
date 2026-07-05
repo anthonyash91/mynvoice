@@ -6,6 +6,7 @@ import {
   calculateTotal,
   formatCurrency,
   formatDateLong,
+  lineItemAmount,
 } from '@/lib/calculations';
 import { formatDurationQuantity, formatInvoiceQuantity } from '@/lib/duration';
 import { splitStreetAndCityLines } from '@/lib/address';
@@ -118,7 +119,7 @@ export function InvoicePrintDocument({
               {formatLineItemQtyRate(item)}
             </div>
             <div className="invoice-print-num invoice-print-amount">
-              {formatCurrency(item.quantity * item.rate)}
+              {formatCurrency(lineItemAmount(item))}
             </div>
           </div>
         ))}

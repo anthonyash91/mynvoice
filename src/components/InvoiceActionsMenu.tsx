@@ -25,7 +25,7 @@ import { StatusIcon } from '@/components/StatusLabel';
 import { invoiceEmailRecipients, validateInvoiceEmail } from '@/lib/email';
 import { formatUnknownError } from '@/lib/errors';
 import { INVOICE_STORED_STATUSES, isHistoricalInvoice, resolveStatus, statusLabel } from '@/lib/invoice';
-import { downloadInvoicePdf } from '@/lib/pdf';
+import { downloadInvoicePdf, generateInvoicePdfBase64, INVOICE_PDF_CAPTURE_WIDTH_PX } from '@/lib/pdf';
 import { cn } from '@/lib/utils';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
 
@@ -45,7 +45,6 @@ interface InvoiceActionsMenuProps {
     actionError: string | null;
     sendValidationError: string | null;
   }) => void;
-  pdfSourceSelector?: string;
   align?: 'left' | 'right';
   buttonClassName?: string;
 }
@@ -82,7 +81,6 @@ export function InvoiceActionsMenu({
   onVisitPublicInvoice,
   onDelete,
   onErrorsChange,
-  pdfSourceSelector,
   align = 'right',
   buttonClassName,
 }: InvoiceActionsMenuProps) {
@@ -102,8 +100,7 @@ export function InvoiceActionsMenu({
 
   const MENU_MIN_WIDTH = 224;
 
-  const pdfSelector = pdfSourceSelector ?? `#invoice-pdf-${invoice.id}`;
-  const usesHiddenPdfCapture = !pdfSourceSelector;
+  const pdfSelector = `#invoice-pdf-${invoice.id}`;
 
   useLayoutEffect(() => {
     if (!menuOpen || !wrapperRef.current) return;
@@ -183,13 +180,12 @@ export function InvoiceActionsMenu({
   }, [sendError, actionError, sendValidationError, onErrorsChange]);
 
   const activatePdfCapture = async () => {
-    if (!usesHiddenPdfCapture) return;
     setPdfCaptureActive(true);
     await waitForPaint();
+    await document.fonts.ready;
   };
 
   const deactivatePdfCapture = () => {
-    if (!usesHiddenPdfCapture) return;
     setPdfCaptureActive(false);
   };
 
@@ -205,7 +201,9 @@ export function InvoiceActionsMenu({
     setSentAction(null);
 
     try {
-      await onSendInvoice('', purpose);
+      await activatePdfCapture();
+      const pdfBase64 = await generateInvoicePdfBase64(pdfSelector);
+      await onSendInvoice(pdfBase64, purpose);
       setSentAction(purpose);
       if (sentTimeoutRef.current) clearTimeout(sentTimeoutRef.current);
       sentTimeoutRef.current = setTimeout(() => setSentAction(null), 3000);
@@ -301,7 +299,11 @@ export function InvoiceActionsMenu({
   return (
     <>
       {pdfCaptureActive && (
-        <div className="pointer-events-none fixed -left-[10000px] top-0" aria-hidden="true">
+        <div
+          className="invoice-print-capture-root"
+          style={{ width: INVOICE_PDF_CAPTURE_WIDTH_PX }}
+          aria-hidden="true"
+        >
           <InvoicePrintDocument
             invoice={invoice}
             client={client}

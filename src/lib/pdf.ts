@@ -6,7 +6,8 @@ const JPEG_QUALITY = 0.84;
 
 const PAGE_WIDTH_MM = 210;
 const PAGE_HEIGHT_MM = 297;
-const CAPTURE_WIDTH_PX = Math.round(PAGE_WIDTH_MM * (96 / 25.4));
+export const INVOICE_PDF_CAPTURE_WIDTH_PX = Math.round(PAGE_WIDTH_MM * (96 / 25.4));
+export const INVOICE_PDF_PADDING_PX = INVOICE_PADDING;
 
 type JsPdfInstance = {
   addImage: (
@@ -55,8 +56,8 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
   const container = document.createElement('div');
   container.setAttribute('aria-hidden', 'true');
   container.className = 'invoice-print-capture-root';
-  container.style.width = `${CAPTURE_WIDTH_PX}px`;
-  container.style.padding = `${INVOICE_PADDING}px`;
+  container.style.width = `${INVOICE_PDF_CAPTURE_WIDTH_PX}px`;
+  container.style.padding = `${INVOICE_PDF_PADDING_PX}px`;
   container.style.background = '#ffffff';
   container.style.boxSizing = 'border-box';
 
@@ -69,7 +70,7 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
 
   try {
     await document.fonts.ready;
-    applyPdfPageBreakAvoidance(container, CAPTURE_WIDTH_PX);
+    applyPdfPageBreakAvoidance(container, INVOICE_PDF_CAPTURE_WIDTH_PX);
 
     const captureHeight = container.scrollHeight;
 
@@ -78,9 +79,9 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
       backgroundColor: '#ffffff',
       useCORS: true,
       logging: false,
-      width: CAPTURE_WIDTH_PX,
+      width: INVOICE_PDF_CAPTURE_WIDTH_PX,
       height: captureHeight,
-      windowWidth: CAPTURE_WIDTH_PX,
+      windowWidth: INVOICE_PDF_CAPTURE_WIDTH_PX,
       windowHeight: captureHeight,
       onclone: (_doc, node) => {
         const el = node as HTMLElement;

@@ -111,6 +111,62 @@ function calculateTotals(
   return { subtotal, tax, total: subtotal + tax };
 }
 
+type RateBreakdownRow = {
+  rate: number;
+  entryType: 'hourly' | 'fixed';
+  isRecurring: boolean;
+  hours: number | null;
+  total: number;
+};
+
+function buildRateBreakdown(lineItems: LineItem[]): RateBreakdownRow[] {
+  const groups = new Map<string, RateBreakdownRow>();
+
+  for (const item of lineItems) {
+    const entryType = lineItemEntryType(item);
+    const isFixed = entryType === 'fixed';
+    const isRecurring = isRecurringLineItem(item);
+    const key = `${isRecurring ? 'recurring-' : ''}${isFixed ? 'fixed' : 'hourly'}:${Number(item.rate ?? 0)}`;
+    const amount = Number(item.quantity ?? 0) * Number(item.rate ?? 0);
+    const existing = groups.get(key);
+
+    if (existing) {
+      if (!isFixed) {
+        existing.hours = (existing.hours ?? 0) + Number(item.quantity ?? 0);
+      }
+      existing.total += amount;
+      continue;
+    }
+
+    groups.set(key, {
+      rate: Number(item.rate ?? 0),
+      entryType: isFixed ? 'fixed' : 'hourly',
+      isRecurring,
+      hours: isFixed ? null : Number(item.quantity ?? 0),
+      total: amount,
+    });
+  }
+
+  return [...groups.values()].sort((a, b) => {
+    if (a.entryType !== b.entryType) {
+      return a.entryType === 'hourly' ? -1 : 1;
+    }
+    if (a.isRecurring !== b.isRecurring) {
+      return a.isRecurring ? 1 : -1;
+    }
+    return a.rate - b.rate;
+  });
+}
+
+function formatDurationQuantity(quantity: number): string {
+  const totalMinutes = Math.round(Math.max(0, quantity) * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours}h`;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
 function statusLabel(status: string): string {
   switch (status) {
     case 'paid':
@@ -151,6 +207,7 @@ export function generateInvoicePdfBase64(input: InvoicePdfInput): string {
   const { invoice, settings, client, clientDisplayName } = input;
   const lineItems = invoice.line_items ?? [];
   const totals = calculateTotals(lineItems, invoice.tax_enabled, Number(invoice.tax_rate ?? 0));
+  const rateBreakdown = buildRateBreakdown(lineItems);
   const [addressLineOne, addressLineTwo] = splitStreetAndCityLines(
     String(settings.business_address ?? '')
   );
@@ -304,6 +361,49 @@ export function generateInvoicePdfBase64(input: InvoicePdfInput): string {
     doc.text(qtyRate, colQty, rowY);
     doc.text(amount, colAmount, rowY, { align: 'right' });
     y += rowHeight + 3;
+  }
+
+  if (rateBreakdown.length > 0) {
+    y += 6;
+    ensureSpace(10);
+    doc.setDrawColor(229, 229, 229);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 6;
+
+    const rateCol = margin;
+    const hoursCol = margin + contentWidth * 0.45;
+    const totalCol = pageWidth - margin;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(110, 110, 115);
+    doc.text('Rate', rateCol, y);
+    doc.text('Hours', hoursCol, y);
+    doc.text('Total', totalCol, y, { align: 'right' });
+    y += 5;
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 6;
+
+    for (const row of rateBreakdown) {
+      ensureSpace(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(17, 17, 17);
+      const rateLabel =
+        row.entryType === 'fixed'
+          ? formatCurrency(row.rate)
+          : `${formatCurrency(row.rate)}/hr`;
+      const hoursLabel =
+        row.hours === null
+          ? row.isRecurring
+            ? 'Recurring'
+            : '—'
+          : formatDurationQuantity(row.hours);
+      doc.text(rateLabel, rateCol, y);
+      doc.text(hoursLabel, hoursCol, y);
+      doc.text(formatCurrency(row.total), totalCol, y, { align: 'right' });
+      y += 6;
+    }
   }
 
   y += 4;

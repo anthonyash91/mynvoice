@@ -112,7 +112,6 @@ export function InvoicePanel({
               onChangeStatus={onChangeStatus}
               onSendInvoice={onSendInvoice}
               onVisitPublicInvoice={onVisitPublicInvoice}
-              pdfSourceSelector=".invoice-print"
               onErrorsChange={handleErrorsChange}
             />
             <button
