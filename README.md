@@ -361,11 +361,34 @@ supabase secrets set APP_URL=https://your-production-domain.com
 npm run functions:deploy
 ```
 
-### 5. Configure automated reminders (optional)
+### 5. Deploy the frontend on Render
+
+Public invoice links use client-side routes like `/i/:token`. Render must serve `index.html` for those paths.
+
+**Option A — Web Service (recommended, uses `render.yaml` in this repo)**
+
+1. In Render, create or convert the service to a **Web Service** (Node), not a Static Site.
+2. Build command: `npm ci && npm run build`
+3. Start command: `npm start`
+4. Add environment variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_APP_URL` (your Render URL, no trailing slash).
+
+`npm start` runs `serve -s dist`, which falls back to `index.html` for `/i/*` routes.
+
+**Option B — Static Site (manual rewrite)**
+
+If you keep a Static Site, open **Redirects/Rewrites** in the Render dashboard and add:
+
+| Source | Destination | Action |
+| --- | --- | --- |
+| `/*` | `/index.html` | Rewrite |
+
+The `public/_redirects` file is for Netlify-style hosts; Render ignores it.
+
+### 6. Configure automated reminders (optional)
 
 Run `supabase/migrate-invoice-email-reminders.sql` in the SQL Editor (includes pg_cron setup instructions and Vault secret placeholders).
 
-### 6. Run locally
+### 7. Run locally
 
 ```bash
 npm run dev
@@ -381,6 +404,7 @@ Open [http://localhost:5173](http://localhost:5173), sign up, fill in **Settings
 | --- | --- |
 | `npm run dev` | Start Vite dev server |
 | `npm run build` | Typecheck and production build |
+| `npm start` | Serve production build with SPA fallback (Render) |
 | `npm run preview` | Preview production build |
 | `npm run lint` | Run ESLint |
 | `npm run functions:deploy` | Deploy all three Edge Functions |
