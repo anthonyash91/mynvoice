@@ -90,7 +90,7 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
         <TextInput
           value={draft.companyName}
           onChange={(v) => set({ companyName: v })}
-          placeholder="Chen Studio"
+          placeholder="Acme Co"
         />
       </Field>
 
@@ -98,7 +98,7 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
         <TextInput
           value={draft.owner}
           onChange={(v) => set({ owner: v })}
-          placeholder="Mia Chen"
+          placeholder="Jane Smith"
         />
       </Field>
 
@@ -107,7 +107,7 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
           type="email"
           value={draft.primaryEmail}
           onChange={(v) => set({ primaryEmail: v })}
-          placeholder="mia@chenstudio.co"
+          placeholder="jane@acme.co"
         />
       </Field>
 

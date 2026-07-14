@@ -53,9 +53,11 @@ import {
 } from '@/lib/database';
 import { publicInvoiceUrl } from '@/lib/appUrl';
 import { sendInvoiceWithPdf } from '@/lib/email';
-import { emptyAppData } from '@/lib/storage';
+import { emptyAppData, clearLegacyLocalSeedData } from '@/lib/storage';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
 import { parseHistoricalCsv } from '@/lib/historicalInvoice';
+
+clearLegacyLocalSeedData();
 
 function getErrorMessage(err: unknown): string {
   if (err && typeof err === 'object' && 'message' in err) {
