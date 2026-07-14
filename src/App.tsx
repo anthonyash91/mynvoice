@@ -21,6 +21,7 @@ import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useStore } from '@/hooks/useStore';
 import { getPublicRoute, PublicInvoiceApp } from '@/views/PublicInvoiceApp';
 import { activeViewFromPanel, type Panel, type View } from '@/types';
+import { needsSettingsSetup } from '@/lib/settings';
 
 const PANEL_ANIMATION_MS = 220;
 
@@ -84,6 +85,7 @@ function AppShell() {
   const panelRef = useRef<Panel | null>(null);
   const panelClosingRef = useRef(false);
   const panelCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setupPromptedRef = useRef(false);
   panelRef.current = panel;
   panelClosingRef.current = panelClosing;
 
@@ -114,6 +116,20 @@ function AppShell() {
     setPanelClosing(false);
     setPanelState(next);
   }, []);
+
+  useEffect(() => {
+    setupPromptedRef.current = false;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || loading) return;
+    if (setupPromptedRef.current) return;
+    if (!needsSettingsSetup(data.settings)) return;
+
+    setupPromptedRef.current = true;
+    setActiveView('invoices');
+    setPanel({ kind: 'settings' });
+  }, [user, loading, data.settings, setPanel]);
 
   const goto = useCallback((next: View) => {
     if (next === 'invoices' || next === 'calendar') {
@@ -281,6 +297,7 @@ function AppShell() {
                 settings={data.settings}
                 onSave={updateSettings}
                 onClose={() => setPanel(null)}
+                setupMode={needsSettingsSetup(data.settings)}
               />
             )}
             {panel.kind === 'templates' && (

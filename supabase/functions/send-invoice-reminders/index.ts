@@ -18,6 +18,7 @@ import {
   resolveLateReminderIntervalDays,
   resolveUnpaidReminderIntervalDays,
 } from '../_shared/reminders.ts';
+import { authorizeServiceRoleRequest } from '../_shared/serviceRoleAuth.ts';
 
 type EmailTemplate = {
   subject: string;
@@ -331,23 +332,20 @@ Deno.serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const serviceRoleKey =
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY');
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl) {
       return jsonResponse({ error: 'Supabase environment is not configured.' }, 500);
     }
 
-    const authHeader = req.headers.get('Authorization') ?? '';
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (token !== serviceRoleKey) {
-      return jsonResponse({ error: 'Unauthorized.' }, 401);
+    const auth = await authorizeServiceRoleRequest(req, supabaseUrl);
+    if (!auth.ok) {
+      return jsonResponse({ error: auth.error }, auth.status);
     }
 
     if (!appOrigin()) {
       return jsonResponse({ error: 'APP_URL is not configured.' }, 500);
     }
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const supabase = createClient(supabaseUrl, auth.serviceRoleKey);
     const settingsCache = new Map<string, Record<string, unknown>>();
     const clientCache = new Map<string, Record<string, unknown> | null>();
     const failures: Array<{ invoiceId: string; reason: string }> = [];

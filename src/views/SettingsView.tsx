@@ -15,9 +15,10 @@ interface SettingsViewProps {
   settings: Settings;
   onSave: (settings: Settings) => Promise<void>;
   onClose: () => void;
+  setupMode?: boolean;
 }
 
-export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
+export function SettingsView({ settings, onSave, onClose, setupMode = false }: SettingsViewProps) {
   const confirm = useConfirm();
   const [draft, setDraft] = useState<Settings>(settings);
   const [saved, setSaved] = useState(false);
@@ -77,6 +78,15 @@ export function SettingsView({ settings, onSave, onClose }: SettingsViewProps) {
     <div className="inline-flex flex-col h-full w-[360px] max-w-full shrink-0">
       <ViewHeader inPanel onClose={onClose} title="Settings" />
       <div className="flex-1 overflow-auto px-6 pt-5 pb-6 space-y-5 min-w-0">
+        {setupMode && (
+          <div className="rounded-md border border-[rgba(0,113,227,0.22)] bg-[rgba(0,113,227,0.07)] px-4 py-3 text-[13px] leading-relaxed text-foreground">
+            <p className="font-medium">Welcome to MyNvoice</p>
+            <p className="mt-1 text-muted-foreground">
+              Add your business name and email so invoices, reminders, and payment pages show the
+              right details.
+            </p>
+          </div>
+        )}
         <Field label="Business name">
           <TextInput
             value={draft.businessName}

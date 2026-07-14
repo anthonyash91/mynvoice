@@ -345,6 +345,15 @@ In the Supabase SQL Editor:
 
 Enable **Email** auth in Supabase (Authentication → Providers).
 
+In **Authentication → URL Configuration**:
+
+| Setting | Value |
+| --- | --- |
+| **Site URL** | `https://your-production-domain.com` (e.g. `https://mynvoice.onrender.com`) |
+| **Redirect URLs** | `https://your-production-domain.com/**` and `http://localhost:5173/**` for local dev |
+
+If Site URL is still `http://localhost:5173`, confirmation emails will send users to localhost after they verify. Set `VITE_APP_URL` on Render to your production URL so signup passes the correct redirect.
+
 ### 4. Deploy Edge Functions
 
 ```bash
@@ -356,6 +365,8 @@ supabase secrets set APP_URL=https://your-production-domain.com
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is injected on deploy — do not set it manually.
+
+For the daily reminder cron (`migrate-invoice-email-reminders.sql`), store Vault secrets named `project_url` and `service_role_key` (current **service_role** key from Project Settings → API). Reminder auth accepts either the injected key or any valid `service_role` JWT, so mild key drift no longer silently blocks all reminders.
 
 ```bash
 npm run functions:deploy

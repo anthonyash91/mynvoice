@@ -42,7 +42,6 @@ import {
   updateHistoricalInvoice as updateHistoricalInvoiceDb,
   insertCalendarEntry,
   updateCalendarEntryRow,
-  importLocalData,
   insertClient,
   saveInvoice,
   updateClientRow,
@@ -54,9 +53,8 @@ import {
 } from '@/lib/database';
 import { publicInvoiceUrl } from '@/lib/appUrl';
 import { sendInvoiceWithPdf } from '@/lib/email';
-import { migrateEmailTemplates } from '@/lib/emailTemplates';
+import { emptyAppData } from '@/lib/storage';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
-import { hasImportedLocalData, loadData, markLocalDataImported } from '@/lib/storage';
 import { parseHistoricalCsv } from '@/lib/historicalInvoice';
 
 function getErrorMessage(err: unknown): string {
@@ -68,30 +66,7 @@ function getErrorMessage(err: unknown): string {
   return 'Failed to load data';
 }
 
-const emptyData: AppData = {
-  clients: [],
-  invoices: [],
-  calendarEntries: [],
-  recurringCalendarExclusions: [],
-  emailHistory: [],
-  settings: {
-    businessName: '',
-    email: '',
-    businessAddress: '',
-    mailingAddress: '',
-    paymentDetails: '',
-    defaultTaxRate: 0,
-    defaultDueDays: 14,
-    reminderIntervalDays: 5,
-    lateReminderIntervalDays: 3,
-    paypalClientId: '',
-    paypalClientSecret: '',
-    paypalSandbox: true,
-    logo: null,
-    emailTemplates: migrateEmailTemplates(),
-  },
-  nextInvoiceNumber: 1,
-};
+const emptyData: AppData = emptyAppData();
 
 export function useStore(user: User | null) {
   const userId = user?.id ?? null;
@@ -111,20 +86,6 @@ export function useStore(user: User | null) {
     setError(null);
     try {
       let appData = await fetchAppData(user.id);
-
-      const hasRemoteData = appData.clients.length > 0 || appData.invoices.length > 0;
-      if (!hasRemoteData && !hasImportedLocalData(user.id)) {
-        const local = loadData();
-        const hasLocalData = local.clients.length > 0 || local.invoices.length > 0;
-        if (hasLocalData) {
-          try {
-            appData = await importLocalData(user.id, local);
-            markLocalDataImported(user.id);
-          } catch (importErr) {
-            console.warn('Local data import skipped:', importErr);
-          }
-        }
-      }
 
       const persistedExclusions = loadPersistedRecurringExclusions(user.id);
       setData({
