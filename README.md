@@ -72,6 +72,8 @@ The invoices table shows **Due** as a countdown (or overdue label) for open invo
 - **Send invoice** — emails the client with an HTML message and PDF attachment via Resend.
 - **Resend invoice** — same flow for already-sent invoices.
 - **Send reminder** — available for unpaid invoices; uses the Reminder template.
+
+Every invoice email (manual send, resend, reminder, late notice, and payment-received) CCs your business email from Settings so you have a copy of what went out.
 - **PDF attachment** — generated server-side in the `send-invoice` Edge Function (compact, text-based PDF) so large client-side captures do not block delivery.
 - **Download PDF** — client-side print-quality PDF from the live invoice preview (html2canvas + jsPDF).
 - **Visit public invoice** — opens the client-facing page in a new tab.

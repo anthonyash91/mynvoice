@@ -1,5 +1,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { buildInvoiceEmailContext } from '../_shared/edgeEmail.ts';
+import {
+  buildInvoiceEmailContext,
+  sendResendEmail,
+} from '../_shared/edgeEmail.ts';
 import { generateInvoicePdfBase64 } from '../_shared/invoicePdf.ts';
 import {
   capturePayPalOrder,
@@ -143,46 +146,6 @@ function ownerNotificationHtml(context: Record<string, string>): string {
   </div>
 </body>
 </html>`;
-}
-
-async function sendResendEmail(input: {
-  apiKey: string;
-  from: string;
-  to: string[];
-  subject: string;
-  html: string;
-  pdfBase64?: string;
-  filename?: string;
-}): Promise<void> {
-  const payload: Record<string, unknown> = {
-    from: input.from,
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-  };
-
-  if (input.pdfBase64) {
-    payload.attachments = [
-      {
-        filename: input.filename?.trim() || 'invoice.pdf',
-        content: input.pdfBase64,
-      },
-    ];
-  }
-
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${input.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = (await response.json()) as { message?: string };
-  if (!response.ok) {
-    throw new Error(data.message || 'Resend rejected the email request.');
-  }
 }
 
 function appOrigin(): string {

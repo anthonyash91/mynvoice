@@ -1,5 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { clientDisplayName } from '../_shared/edgeEmail.ts';
+import {
+  clientDisplayName,
+  extractEmailAddress,
+  isValidEmail,
+  ownerCcRecipients,
+} from '../_shared/edgeEmail.ts';
 import { generateInvoicePdfBase64 } from '../_shared/invoicePdf.ts';
 
 const corsHeaders = {
@@ -33,18 +38,6 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
       'Content-Type': 'application/json',
     },
   });
-}
-
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function extractEmailAddress(from: string): string | null {
-  const match = from.match(/<([^>]+)>/);
-  if (match?.[1]) return match[1].trim();
-
-  const trimmed = from.trim();
-  return isValidEmail(trimmed) ? trimmed : null;
 }
 
 async function fetchClientForInvoice(
@@ -234,12 +227,26 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: `Invalid recipient: ${invalidRecipient}` }, 400);
     }
 
+    const { data: settingsRow } = await supabase
+      .from('user_settings')
+      .select('email')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    const settingsEmail = String(settingsRow?.email ?? '').trim();
+    const ccSource = isValidEmail(settingsEmail) ? settingsEmail : from;
+
     const payload: Record<string, unknown> = {
       from,
       to,
       subject,
       html,
     };
+
+    const cc = ownerCcRecipients(ccSource, to);
+    if (cc.length > 0) {
+      payload.cc = cc;
+    }
 
     if (pdfBase64) {
       payload.attachments = [

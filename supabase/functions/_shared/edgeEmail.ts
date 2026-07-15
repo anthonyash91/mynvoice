@@ -248,6 +248,30 @@ export function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+/** Bare address from `Name <email>` or a plain email string. */
+export function extractEmailAddress(from: string): string | null {
+  const match = from.match(/<([^>]+)>/);
+  const candidate = (match?.[1] ?? from).trim();
+  return isValidEmail(candidate) ? candidate : null;
+}
+
+/**
+ * CC the business owner on outbound invoice mail so they see every send.
+ * Skips when the owner is already a To recipient (e.g. owner payment alerts).
+ * Derived server-side from `from` — never accept client-supplied CC.
+ */
+export function ownerCcRecipients(from: string, to: string[]): string[] {
+  const owner = extractEmailAddress(from);
+  if (!owner) return [];
+
+  const toSet = new Set(
+    to.map((email) => email.trim().toLowerCase()).filter(Boolean)
+  );
+  if (toSet.has(owner.toLowerCase())) return [];
+
+  return [owner];
+}
+
 export async function sendResendEmail(input: {
   apiKey: string;
   from: string;
@@ -263,6 +287,11 @@ export async function sendResendEmail(input: {
     subject: input.subject,
     html: input.html,
   };
+
+  const cc = ownerCcRecipients(input.from, input.to);
+  if (cc.length > 0) {
+    payload.cc = cc;
+  }
 
   if (input.pdfBase64) {
     payload.attachments = [
