@@ -192,7 +192,10 @@ Deno.serve(async (req) => {
     const invoiceId = body.invoiceId?.trim() ?? body.tracking?.invoiceId?.trim() ?? '';
 
     let pdfBase64 = body.pdfBase64?.trim() ?? '';
-    if (!pdfBase64 && invoiceId) {
+    const emailKind = body.tracking?.emailKind?.trim() ?? '';
+    // Paid / unpaid / reminder emails from the app must use the download-quality capture.
+    // Only fall back to the server PDF when no client attachment was provided (e.g. cron).
+    if (!pdfBase64 && invoiceId && emailKind !== 'payment_received') {
       try {
         pdfBase64 = await buildInvoicePdfBase64(supabase, user.id, invoiceId);
       } catch (pdfError) {
@@ -200,6 +203,18 @@ Deno.serve(async (req) => {
           pdfError instanceof Error ? pdfError.message : 'Failed to generate invoice PDF.';
         return jsonResponse({ error: message }, 500);
       }
+    }
+
+    if (!pdfBase64) {
+      return jsonResponse(
+        {
+          error:
+            emailKind === 'payment_received'
+              ? 'Paid invoice PDF is required.'
+              : 'Invoice PDF is required.',
+        },
+        400
+      );
     }
 
     if (to.length === 0) {

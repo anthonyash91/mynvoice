@@ -1,13 +1,21 @@
 import { applyPdfPageBreakAvoidance } from '@/lib/pdfPageBreaks';
 
 const INVOICE_PADDING = 40;
+/** Same scale/quality for Download and every email attachment. */
 const CAPTURE_SCALE = 1.5;
 const JPEG_QUALITY = 0.84;
+/** ~5 MB decoded — matches send-invoice attachment cap. */
+const MAX_EMAIL_PDF_BASE64_CHARS = Math.ceil(5 * 1024 * 1024 * (4 / 3));
 
 const PAGE_WIDTH_MM = 210;
 const PAGE_HEIGHT_MM = 297;
 export const INVOICE_PDF_CAPTURE_WIDTH_PX = Math.round(PAGE_WIDTH_MM * (96 / 25.4));
 export const INVOICE_PDF_PADDING_PX = INVOICE_PADDING;
+
+type PdfCaptureOptions = {
+  scale?: number;
+  jpegQuality?: number;
+};
 
 type JsPdfInstance = {
   addImage: (
@@ -38,15 +46,21 @@ function sliceCanvas(
 
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, slice.width, slice.height);
-  ctx.drawImage(source, 0, y, source.width, height, 0, 0, source.width, height);
+  ctx.drawImage(source, 0, y, source.width, height, 0, 0, slice.width, height);
   return slice;
 }
 
-async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsPdfInstance> {
+async function captureInvoicePdf(
+  sourceSelector = '.invoice-print',
+  options: PdfCaptureOptions = {}
+): Promise<JsPdfInstance> {
   const source = document.querySelector<HTMLElement>(sourceSelector);
   if (!source) {
     throw new Error('Invoice preview is not ready. Try again in a moment.');
   }
+
+  const scale = options.scale ?? CAPTURE_SCALE;
+  const jpegQuality = options.jpegQuality ?? JPEG_QUALITY;
 
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import('html2canvas-pro'),
@@ -75,7 +89,7 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
     const captureHeight = container.scrollHeight;
 
     const canvas = await html2canvas(container, {
-      scale: CAPTURE_SCALE,
+      scale,
       backgroundColor: '#ffffff',
       useCORS: true,
       logging: false,
@@ -106,7 +120,7 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
 
       const sliceHeightPx = Math.min(pageSliceHeightPx, canvas.height - offsetY);
       const slice = sliceCanvas(canvas, offsetY, sliceHeightPx);
-      const imgData = slice.toDataURL('image/jpeg', JPEG_QUALITY);
+      const imgData = slice.toDataURL('image/jpeg', jpegQuality);
       const sliceHeightMm = (sliceHeightPx / canvas.width) * PAGE_WIDTH_MM;
 
       pdf.addImage(imgData, 'JPEG', 0, 0, PAGE_WIDTH_MM, sliceHeightMm);
@@ -121,8 +135,11 @@ async function captureInvoicePdf(sourceSelector = '.invoice-print'): Promise<JsP
   }
 }
 
-export async function generateInvoicePdfBlob(sourceSelector?: string): Promise<Blob> {
-  const pdf = await captureInvoicePdf(sourceSelector);
+export async function generateInvoicePdfBlob(
+  sourceSelector?: string,
+  options?: PdfCaptureOptions
+): Promise<Blob> {
+  const pdf = await captureInvoicePdf(sourceSelector, options);
   return pdf.output('blob');
 }
 
@@ -147,9 +164,28 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function generateInvoicePdfBase64(sourceSelector?: string): Promise<string> {
-  const blob = await generateInvoicePdfBlob(sourceSelector);
+export async function generateInvoicePdfBase64(
+  sourceSelector?: string,
+  options?: PdfCaptureOptions
+): Promise<string> {
+  const blob = await generateInvoicePdfBlob(sourceSelector, options);
   return blobToBase64(blob);
+}
+
+/**
+ * Same capture as Download — payment-received and other emails must match
+ * the print document, not the server jsPDF layout.
+ */
+export async function generateEmailInvoicePdfBase64(
+  sourceSelector?: string
+): Promise<string> {
+  const pdfBase64 = await generateInvoicePdfBase64(sourceSelector);
+  if (pdfBase64.length > MAX_EMAIL_PDF_BASE64_CHARS) {
+    throw new Error(
+      'Invoice PDF is too large to email. Try a shorter invoice or a smaller logo.'
+    );
+  }
+  return pdfBase64;
 }
 
 export async function downloadInvoicePdf(

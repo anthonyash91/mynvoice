@@ -117,7 +117,7 @@ export function buildSampleEmailTemplateContext(): Record<string, string> {
   return {
     ...SAMPLE_EMAIL_TEMPLATE_CONTEXT,
     invoiceLink: `${origin}/i/${SAMPLE_PUBLIC_TOKEN}`,
-    paymentSentLink: `${origin}/i/${SAMPLE_PUBLIC_TOKEN}/payment-sent`,
+    paymentSentLink: `${origin}/i/${SAMPLE_PUBLIC_TOKEN}?payment=sent`,
     confirmPaymentLink: `${origin}/confirm-payment/${SAMPLE_OWNER_CONFIRM_TOKEN}`,
   };
 }

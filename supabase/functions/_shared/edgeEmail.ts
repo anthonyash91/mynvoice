@@ -200,7 +200,7 @@ export function buildInvoiceEmailContext(
   const origin = appOrigin();
   const invoiceLink = origin && publicToken ? `${origin}/i/${publicToken}` : '';
   const paymentSentLink =
-    origin && publicToken ? `${origin}/i/${publicToken}/payment-sent` : '';
+    origin && publicToken ? `${origin}/i/${publicToken}?payment=sent` : '';
 
   return {
     clientName,

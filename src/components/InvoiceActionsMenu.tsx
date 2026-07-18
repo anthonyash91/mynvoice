@@ -25,7 +25,11 @@ import { StatusIcon } from '@/components/StatusLabel';
 import { invoiceEmailRecipients, validateInvoiceEmail } from '@/lib/email';
 import { formatUnknownError } from '@/lib/errors';
 import { INVOICE_STORED_STATUSES, isHistoricalInvoice, resolveStatus, statusLabel } from '@/lib/invoice';
-import { downloadInvoicePdf, generateInvoicePdfBase64, INVOICE_PDF_CAPTURE_WIDTH_PX } from '@/lib/pdf';
+import {
+  downloadInvoicePdf,
+  generateEmailInvoicePdfBase64,
+  INVOICE_PDF_CAPTURE_WIDTH_PX,
+} from '@/lib/pdf';
 import { cn } from '@/lib/utils';
 import type { Client, Invoice, InvoiceStoredStatus, Settings } from '@/types';
 
@@ -36,7 +40,10 @@ interface InvoiceActionsMenuProps {
   client: Client | null;
   settings: Settings;
   onEdit: () => void;
-  onChangeStatus: (status: InvoiceStoredStatus) => Promise<void>;
+  onChangeStatus: (
+    status: InvoiceStoredStatus,
+    pdfBase64?: string
+  ) => Promise<void>;
   onSendInvoice: (pdfBase64: string, purpose: 'invoice' | 'reminder') => Promise<void>;
   onVisitPublicInvoice: () => Promise<void>;
   onDelete?: () => Promise<void>;
@@ -93,6 +100,7 @@ export function InvoiceActionsMenu({
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusUpdating, setStatusUpdating] = useState<InvoiceStoredStatus | null>(null);
   const [pdfCaptureActive, setPdfCaptureActive] = useState(false);
+  const [pdfCaptureInvoice, setPdfCaptureInvoice] = useState<Invoice | null>(null);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const wrapperRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -168,7 +176,7 @@ export function InvoiceActionsMenu({
   }, [client]);
 
   const isFirstSend = invoice.emailSendCount === 0;
-  const canSendReminder = invoice.status === 'unpaid';
+  const canSendReminder = invoice.status === 'unpaid' && invoice.emailSendCount > 0;
   const historical = isHistoricalInvoice(invoice);
 
   useEffect(() => {
@@ -179,7 +187,8 @@ export function InvoiceActionsMenu({
     });
   }, [sendError, actionError, sendValidationError, onErrorsChange]);
 
-  const activatePdfCapture = async () => {
+  const activatePdfCapture = async (captureInvoice: Invoice = invoice) => {
+    setPdfCaptureInvoice(captureInvoice);
     setPdfCaptureActive(true);
     await waitForPaint();
     await document.fonts.ready;
@@ -187,6 +196,7 @@ export function InvoiceActionsMenu({
 
   const deactivatePdfCapture = () => {
     setPdfCaptureActive(false);
+    setPdfCaptureInvoice(null);
   };
 
   const sendWithPurpose = async (purpose: 'invoice' | 'reminder') => {
@@ -201,8 +211,12 @@ export function InvoiceActionsMenu({
     setSentAction(null);
 
     try {
-      await activatePdfCapture();
-      const pdfBase64 = await generateInvoicePdfBase64(pdfSelector);
+      const captureInvoice =
+        purpose === 'invoice' && invoice.status === 'draft'
+          ? { ...invoice, status: 'unpaid' as const }
+          : invoice;
+      await activatePdfCapture(captureInvoice);
+      const pdfBase64 = await generateEmailInvoicePdfBase64(pdfSelector);
       await onSendInvoice(pdfBase64, purpose);
       setSentAction(purpose);
       if (sentTimeoutRef.current) clearTimeout(sentTimeoutRef.current);
@@ -221,10 +235,19 @@ export function InvoiceActionsMenu({
     setActionError(null);
     setStatusUpdating(nextStatus);
     try {
-      await onChangeStatus(nextStatus);
+      if (nextStatus === 'paid') {
+        const paidAt = new Date().toISOString().split('T')[0];
+        await activatePdfCapture({ ...invoice, status: 'paid', paidAt });
+        const pdfBase64 = await generateEmailInvoicePdfBase64(pdfSelector);
+        deactivatePdfCapture();
+        await onChangeStatus(nextStatus, pdfBase64);
+      } else {
+        await onChangeStatus(nextStatus);
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to update status.');
     } finally {
+      deactivatePdfCapture();
       setStatusUpdating(null);
     }
   };
@@ -305,7 +328,7 @@ export function InvoiceActionsMenu({
           aria-hidden="true"
         >
           <InvoicePrintDocument
-            invoice={invoice}
+            invoice={pdfCaptureInvoice ?? invoice}
             client={client}
             settings={settings}
             printId={`invoice-pdf-${invoice.id}`}
@@ -418,9 +441,11 @@ export function InvoiceActionsMenu({
                     Boolean(sendingAction) || !canSendReminder || Boolean(sendValidationError)
                   }
                   title={
-                    !canSendReminder
-                      ? 'Reminders are available for unpaid invoices.'
-                      : (sendValidationError ?? `Send reminder to ${recipientSummary ?? 'client'}`)
+                    invoice.emailSendCount === 0
+                      ? 'Send the invoice before sending a reminder.'
+                      : !canSendReminder
+                        ? 'Reminders are available for unpaid invoices.'
+                        : (sendValidationError ?? `Send reminder to ${recipientSummary ?? 'client'}`)
                   }
                   className={cn(
                     menuItemClass,

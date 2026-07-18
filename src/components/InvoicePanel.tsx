@@ -21,7 +21,10 @@ interface InvoicePanelProps {
   onClose: () => void;
   onBack?: () => void;
   onEdit: () => void;
-  onChangeStatus: (status: InvoiceStoredStatus) => Promise<void>;
+  onChangeStatus: (
+    status: InvoiceStoredStatus,
+    pdfBase64?: string
+  ) => Promise<void>;
   onSendInvoice: (pdfBase64: string, purpose: 'invoice' | 'reminder') => Promise<void>;
   onVisitPublicInvoice: () => Promise<void>;
   onUpdateReminderSettings: (settings: InvoiceReminderSettings) => Promise<void>;

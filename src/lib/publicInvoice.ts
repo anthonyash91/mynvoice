@@ -47,9 +47,13 @@ interface PublicInvoiceResponse {
 }
 
 async function invokeInvoicePublic(
-  body: Record<string, string>
+  body: Record<string, string | undefined>
 ): Promise<PublicInvoiceResponse> {
-  const { data, error, response } = await supabase.functions.invoke('invoice-public', { body });
+  const { data, error, response } = await supabase.functions.invoke('invoice-public', {
+    body: Object.fromEntries(
+      Object.entries(body).filter(([, value]) => value != null && value !== '')
+    ),
+  });
 
   if (hasFunctionInvokeFailure(data, error)) {
     const failureMessage = await readFunctionInvokeError(
@@ -172,24 +176,34 @@ export interface ConfirmPaymentPreview {
   clientName: string;
   status: string;
   alreadyPaid: boolean;
+  payload: PublicInvoicePayload | null;
 }
 
 export async function fetchConfirmPaymentPreview(token: string): Promise<ConfirmPaymentPreview> {
   const response = await invokeInvoicePublic({ action: 'preview_confirm_payment', token });
+  const hasPayload = Boolean(response.invoice && response.settings);
   return {
-    invoiceNumber: response.invoiceNumber ?? '',
-    clientName: response.clientName ?? '',
-    status: response.status ?? '',
+    invoiceNumber: response.invoiceNumber ?? response.invoice?.number ?? '',
+    clientName: response.clientName ?? response.invoice?.clientName ?? '',
+    status: response.status ?? response.invoice?.status ?? '',
     alreadyPaid: Boolean(response.alreadyPaid),
+    payload: hasPayload ? normalizePublicPayload(response) : null,
   };
 }
 
-export async function confirmPublicPayment(token: string): Promise<{
+export async function confirmPublicPayment(
+  token: string,
+  pdfBase64?: string
+): Promise<{
   invoiceNumber: string;
   clientName: string;
   alreadyPaid: boolean;
 }> {
-  const response = await invokeInvoicePublic({ action: 'confirm_payment', token });
+  const response = await invokeInvoicePublic({
+    action: 'confirm_payment',
+    token,
+    pdfBase64: pdfBase64?.trim() || undefined,
+  });
   return {
     invoiceNumber: response.invoiceNumber ?? response.invoice?.number ?? '',
     clientName: response.clientName ?? response.invoice?.clientName ?? '',

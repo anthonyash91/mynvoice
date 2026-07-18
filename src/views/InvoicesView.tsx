@@ -38,7 +38,11 @@ interface InvoicesViewProps {
   onNewInvoice: () => void;
   onImportHistorical: () => void;
   onEditInvoice: (id: string) => void;
-  onChangeInvoiceStatus: (id: string, status: InvoiceStoredStatus) => Promise<void>;
+  onChangeInvoiceStatus: (
+    id: string,
+    status: InvoiceStoredStatus,
+    pdfBase64?: string
+  ) => Promise<void>;
   onSendInvoice: (
     id: string,
     pdfBase64: string,
@@ -302,7 +306,9 @@ export function InvoicesView({
                       client={client}
                       settings={settings}
                       onEdit={() => onEditInvoice(inv.id)}
-                      onChangeStatus={(nextStatus) => onChangeInvoiceStatus(inv.id, nextStatus)}
+                      onChangeStatus={(nextStatus, pdfBase64) =>
+                        onChangeInvoiceStatus(inv.id, nextStatus, pdfBase64)
+                      }
                       onSendInvoice={(pdfBase64, purpose) =>
                         onSendInvoice(inv.id, pdfBase64, purpose)
                       }

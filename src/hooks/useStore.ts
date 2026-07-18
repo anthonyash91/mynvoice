@@ -191,13 +191,12 @@ export function useStore(user: User | null) {
   const saveInvoiceDraft = useCallback(
     async (draft: InvoiceDraft, status: Invoice['status'] = 'draft') => {
       if (!user) throw new Error('Not signed in');
-      const existing = data.invoices.find((inv) => inv.number === draft.number);
+      // Always create a new row. Edits go through updateInvoiceDraft with an explicit id.
+      // Matching by number alone used to overwrite other clients' (often historical) invoices.
       const { invoice, nextInvoiceNumber, newClient } = await saveInvoice(
         user.id,
         draft,
-        status,
-        existing?.id,
-        existing?.createdAt
+        status
       );
 
       const calendarEntryIds = draft.lineItems
@@ -241,7 +240,7 @@ export function useStore(user: User | null) {
 
       return invoice;
     },
-    [user, data.invoices]
+    [user]
   );
 
   const updateInvoiceDraft = useCallback(
@@ -339,8 +338,65 @@ export function useStore(user: User | null) {
   );
 
   const updateInvoiceStatus = useCallback(
-    async (invoiceId: string, status: Invoice['status']) => {
+    async (invoiceId: string, status: Invoice['status'], pdfBase64?: string) => {
       if (!user) throw new Error('Not signed in');
+
+      const snapshot = dataRef.current;
+      const existing = snapshot.invoices.find((inv) => inv.id === invoiceId);
+      if (!existing) throw new Error('Invoice not found');
+
+      if (status === 'paid' && !existing.isHistorical) {
+        const client = snapshot.clients.find((item) => item.id === existing.clientId) ?? null;
+        const recipients = client
+          ? [client.primaryEmail, ...client.additionalEmails]
+              .map((email) => email.trim())
+              .filter(Boolean)
+          : [];
+
+        if (recipients.length > 0 && !pdfBase64?.trim()) {
+          throw new Error('Paid invoice PDF is required before notifying the client.');
+        }
+
+        let invoiceWithToken = existing.publicToken
+          ? existing
+          : await ensureInvoicePublicToken(user.id, invoiceId);
+
+        const updated = await updateInvoiceStatusRow(user.id, invoiceId, 'paid');
+        invoiceWithToken = {
+          ...updated,
+          publicToken: updated.publicToken ?? invoiceWithToken.publicToken,
+        };
+
+        if (client && recipients.length > 0 && pdfBase64?.trim()) {
+          await sendInvoiceWithPdf(
+            invoiceWithToken,
+            client,
+            snapshot.settings,
+            pdfBase64,
+            'payment_received'
+          );
+          const tracked = await recordInvoiceEmailSent(user.id, invoiceId, 'payment_received');
+          const emailHistory = await fetchEmailHistory(user.id);
+          const finalInvoice = {
+            ...invoiceWithToken,
+            ...tracked,
+            publicToken: invoiceWithToken.publicToken ?? tracked.publicToken,
+          };
+          setData((prev) => ({
+            ...prev,
+            invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? finalInvoice : inv)),
+            emailHistory,
+          }));
+          return;
+        }
+
+        setData((prev) => ({
+          ...prev,
+          invoices: prev.invoices.map((inv) => (inv.id === invoiceId ? invoiceWithToken : inv)),
+        }));
+        return;
+      }
+
       const updated = await updateInvoiceStatusRow(user.id, invoiceId, status);
       setData((prev) => ({
         ...prev,
@@ -380,7 +436,18 @@ export function useStore(user: User | null) {
       const client = snapshot.clients.find((item) => item.id === invoice.clientId);
       if (!client) throw new Error('Link this invoice to a client before sending.');
 
-      const invoiceWithToken = await ensureInvoicePublicToken(user.id, invoiceId);
+      let invoiceWithToken = await ensureInvoicePublicToken(user.id, invoiceId);
+
+      // Promote draft → unpaid before email so status in the app matches the send.
+      if (invoiceWithToken.status === 'draft' && purpose === 'invoice') {
+        const publicToken = invoiceWithToken.publicToken;
+        invoiceWithToken = await updateInvoiceStatusRow(user.id, invoiceId, 'unpaid');
+        invoiceWithToken = {
+          ...invoiceWithToken,
+          publicToken: invoiceWithToken.publicToken ?? publicToken,
+        };
+      }
+
       const templateKind = resolveSendTemplateKind(resolveStatus(invoiceWithToken), purpose);
 
       await sendInvoiceWithPdf(
@@ -394,19 +461,11 @@ export function useStore(user: User | null) {
       const trackedInvoice = await recordInvoiceEmailSent(user.id, invoiceId, templateKind);
       const emailHistory = await fetchEmailHistory(user.id);
 
-      let finalInvoice = {
+      const finalInvoice = {
         ...invoiceWithToken,
         ...trackedInvoice,
         publicToken: invoiceWithToken.publicToken ?? trackedInvoice.publicToken,
       };
-
-      if (invoiceWithToken.status === 'draft' && purpose === 'invoice') {
-        finalInvoice = await updateInvoiceStatusRow(user.id, invoiceId, 'unpaid');
-        finalInvoice = {
-          ...finalInvoice,
-          publicToken: invoiceWithToken.publicToken ?? finalInvoice.publicToken,
-        };
-      }
 
       setData((prev) => ({
         ...prev,

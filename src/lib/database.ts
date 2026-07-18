@@ -672,6 +672,7 @@ function invoiceToRow(
     tax_enabled: invoice.taxEnabled,
     tax_rate: invoice.taxRate,
     status: invoice.status,
+    is_historical: false,
     created_at: invoice.createdAt,
   };
 }
@@ -1072,7 +1073,7 @@ export async function saveInvoice(
 
   let byNumberQuery = supabase
     .from('invoices')
-    .select('id, created_at')
+    .select('id')
     .eq('user_id', userId)
     .eq('number', draft.number);
 
@@ -1084,10 +1085,19 @@ export async function saveInvoice(
 
   if (byNumber.error) throw byNumber.error;
 
-  const isNew = !existingId && !byNumber.data;
-  const id = existingId ?? byNumber.data?.id ?? crypto.randomUUID();
+  if (existingId) {
+    const existing = await refetchInvoice(userId, existingId);
+    if (existing.isHistorical) {
+      throw new Error('Historical invoices can only be edited from Import historical.');
+    }
+  } else if (byNumber.data) {
+    throw new Error(`Invoice ${draft.number} already exists for this client.`);
+  }
+
+  const isNew = !existingId;
+  const id = existingId ?? crypto.randomUUID();
   const createdAt =
-    existingCreatedAt ?? byNumber.data?.created_at ?? new Date().toISOString().split('T')[0];
+    existingCreatedAt ?? new Date().toISOString().split('T')[0];
 
   const invoice = draftToInvoice({ ...draft, clientId }, status, id, createdAt);
   const row = invoiceToRow(userId, invoice);
@@ -1111,15 +1121,37 @@ export async function saveInvoice(
         .select(INVOICE_SELECT_BASE)
         .single();
     }
+    if (result.error && isMissingHistoricalColumnError(result.error)) {
+      const { is_historical: _historical, ...withoutHistorical } = updateFields as Record<
+        string,
+        unknown
+      > & { is_historical?: boolean };
+      result = await supabase
+        .from('invoices')
+        .update(withoutHistorical)
+        .eq('user_id', userId)
+        .eq('id', id)
+        .select(INVOICE_SELECT_NO_HISTORICAL)
+        .single();
+    }
     if (result.error) throw result.error;
-    data = result.data;
+    data = result.data as unknown as DbInvoice;
   } else {
     let result = await supabase.from('invoices').insert(row).select(INVOICE_SELECT).single();
     if (result.error && isMissingPublicTokenColumnError(result.error)) {
       result = await supabase.from('invoices').insert(row).select(INVOICE_SELECT_BASE).single();
     }
+    if (result.error && isMissingHistoricalColumnError(result.error)) {
+      const insertRow = { ...row } as Record<string, unknown>;
+      delete insertRow.is_historical;
+      result = await supabase
+        .from('invoices')
+        .insert(insertRow)
+        .select(INVOICE_SELECT_NO_HISTORICAL)
+        .single();
+    }
     if (result.error) throw result.error;
-    data = result.data;
+    data = result.data as unknown as DbInvoice;
   }
 
   const { data: settings, error: settingsError } = await supabase

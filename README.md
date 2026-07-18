@@ -158,7 +158,7 @@ Four customizable HTML templates with shared CSS, edited in **Templates** with l
 | `{{total}}` | Invoice total (currency) |
 | `{{businessName}}` | Your business name |
 | `{{invoiceLink}}` | Public invoice URL (`/i/:token`) |
-| `{{paymentSentLink}}` | Client “payment sent” URL (`/i/:token/payment-sent`) |
+| `{{paymentSentLink}}` | Client “payment sent” URL (`/i/:token?payment=sent`) |
 | `{{confirmPaymentLink}}` | Owner confirm URL (`/confirm-payment/:token`) |
 | `{{paymentDate}}` | Date marked paid |
 | `{{emailSendCount}}` | Emails sent count (including current send in previews) |
@@ -226,7 +226,7 @@ sequenceDiagram
 | Route | Who | What happens |
 | --- | --- | --- |
 | `/i/:token` | Client | View invoice, pay with PayPal, or mark payment sent |
-| `/i/:token/payment-sent` | Client | Same page with a prominent confirmation card (no auto-submit on load) |
+| `/i/:token?payment=sent` | Client | Same page with a prominent confirmation card (no auto-submit on load). Legacy `/i/:token/payment-sent` still works. |
 | `/confirm-payment/:token` | Owner | Preview invoice details, then explicitly confirm payment received |
 
 Security notes:

@@ -375,54 +375,61 @@ function toPublicPayload(
   };
 }
 
-async function markInvoicePaidAndNotifyClient(input: {
-  supabase: ReturnType<typeof createClient>;
-  resendApiKey: string;
+/** Keep inbound PDF bodies under the send-invoice attachment cap (~5 MB decoded). */
+const MAX_CLIENT_PDF_BASE64_CHARS = Math.ceil(5 * 1024 * 1024 * (4 / 3));
+
+function usableClientPdfBase64(value: string | undefined): string {
+  const pdfBase64 = value?.trim() ?? '';
+  if (!pdfBase64) return '';
+  if (pdfBase64.length > MAX_CLIENT_PDF_BASE64_CHARS) {
+    throw new Error(
+      'Invoice PDF is too large to attach. Try a shorter invoice or a smaller logo.'
+    );
+  }
+  if (pdfBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(pdfBase64)) {
+    throw new Error('Invalid invoice PDF attachment.');
+  }
+
+  let decoded: Uint8Array;
+  try {
+    const binary = atob(pdfBase64);
+    decoded = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  } catch {
+    throw new Error('Invalid invoice PDF attachment.');
+  }
+
+  const header = String.fromCharCode(...decoded.slice(0, 4));
+  if (header !== '%PDF') {
+    throw new Error('Invalid invoice PDF attachment.');
+  }
+
+  return pdfBase64;
+}
+
+function resolvePaymentReceivedPdf(input: {
   invoice: Record<string, unknown>;
   settings: Record<string, unknown>;
   clientRow: Record<string, unknown> | null;
-}): Promise<void> {
-  if (input.invoice.is_historical === true) {
-    const paidAt = new Date().toISOString().split('T')[0];
-    const { error: updateError } = await input.supabase
-      .from('invoices')
-      .update({ status: 'paid', paid_at: paidAt })
-      .eq('id', input.invoice.id);
-    if (updateError) throw updateError;
-    return;
+  pdfBase64?: string;
+  allowServerPdfFallback?: boolean;
+  requirePdf: boolean;
+}): string {
+  const pdfBase64 = usableClientPdfBase64(input.pdfBase64);
+  if (pdfBase64) return pdfBase64;
+
+  if (!input.requirePdf) return '';
+
+  // Server jsPDF does not match Download / app email captures. Only PayPal
+  // (no browser) may use it.
+  if (!input.allowServerPdfFallback) {
+    throw new Error(
+      'A print-quality invoice PDF is required. Confirm payment again from the confirmation page.'
+    );
   }
 
-  const paidAt = new Date().toISOString().split('T')[0];
-  const { error: updateError } = await input.supabase
-    .from('invoices')
-    .update({ status: 'paid', paid_at: paidAt })
-    .eq('id', input.invoice.id);
-
-  if (updateError) throw updateError;
-  input.invoice.status = 'paid';
-  input.invoice.paid_at = paidAt;
-
-  const recipients = clientRecipients(input.clientRow);
-  if (recipients.length === 0) return;
-
-  const templates = (input.settings.email_templates as EmailTemplates | null) ?? {};
-  const template = templates.payment_received ?? defaultPaymentReceivedTemplate();
   const displayName = clientDisplayName(input.clientRow, String(input.invoice.client_name));
-  const context = buildContext(
-    input.invoice,
-    input.settings,
-    displayName,
-    String(input.invoice.public_token ?? '')
-  );
-  const rendered = renderTemplate(template, context);
-  const ownerEmail = String(input.settings.email ?? '').trim();
-  const fromName = String(input.settings.business_name ?? '').trim();
-  const from = fromName && ownerEmail ? `${fromName} <${ownerEmail}>` : ownerEmail;
-
-  if (!from || !isValidEmail(ownerEmail)) return;
-
   const publicClient = normalizePublicClient(input.clientRow, String(input.invoice.client_name));
-  const pdfBase64 = generateInvoicePdfBase64({
+  return generateInvoicePdfBase64({
     invoice: {
       number: String(input.invoice.number),
       issue_date: String(input.invoice.issue_date),
@@ -443,6 +450,35 @@ async function markInvoicePaidAndNotifyClient(input: {
     client: publicClient,
     clientDisplayName: displayName,
   });
+}
+
+async function sendPaymentReceivedEmail(input: {
+  supabase: ReturnType<typeof createClient>;
+  resendApiKey: string;
+  invoice: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  clientRow: Record<string, unknown> | null;
+  pdfBase64: string;
+}): Promise<boolean> {
+  const recipients = clientRecipients(input.clientRow);
+  const ownerEmail = String(input.settings.email ?? '').trim();
+  const fromName = String(input.settings.business_name ?? '').trim();
+  const from = fromName && ownerEmail ? `${fromName} <${ownerEmail}>` : ownerEmail;
+
+  if (recipients.length === 0 || !from || !isValidEmail(ownerEmail) || !input.pdfBase64) {
+    return false;
+  }
+
+  const templates = (input.settings.email_templates as EmailTemplates | null) ?? {};
+  const template = templates.payment_received ?? defaultPaymentReceivedTemplate();
+  const displayName = clientDisplayName(input.clientRow, String(input.invoice.client_name));
+  const context = buildContext(
+    input.invoice,
+    input.settings,
+    displayName,
+    String(input.invoice.public_token ?? '')
+  );
+  const rendered = renderTemplate(template, context);
 
   await sendResendEmail({
     apiKey: input.resendApiKey,
@@ -450,7 +486,7 @@ async function markInvoicePaidAndNotifyClient(input: {
     to: recipients,
     subject: rendered.subject,
     html: rendered.html,
-    pdfBase64,
+    pdfBase64: input.pdfBase64,
     filename: `${String(input.invoice.number)}.pdf`,
   });
 
@@ -478,6 +514,82 @@ async function markInvoicePaidAndNotifyClient(input: {
     email_kind: 'payment_received',
     sent_at: sentAt,
   });
+
+  return true;
+}
+
+async function markInvoicePaidAndNotifyClient(input: {
+  supabase: ReturnType<typeof createClient>;
+  resendApiKey: string;
+  invoice: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  clientRow: Record<string, unknown> | null;
+  pdfBase64?: string;
+  /** Prefer client-captured PDFs; allow server fallback when the browser PDF never arrives. */
+  allowServerPdfFallback?: boolean;
+}): Promise<void> {
+  if (input.invoice.is_historical === true) {
+    const paidAt = new Date().toISOString().split('T')[0];
+    const { error: updateError } = await input.supabase
+      .from('invoices')
+      .update({ status: 'paid', paid_at: paidAt })
+      .eq('id', input.invoice.id)
+      .neq('status', 'paid');
+    if (updateError) throw updateError;
+    return;
+  }
+
+  const recipients = clientRecipients(input.clientRow);
+  const ownerEmail = String(input.settings.email ?? '').trim();
+  const fromName = String(input.settings.business_name ?? '').trim();
+  const from = fromName && ownerEmail ? `${fromName} <${ownerEmail}>` : ownerEmail;
+  const shouldEmail =
+    recipients.length > 0 && Boolean(from) && isValidEmail(ownerEmail);
+
+  // Resolve PDF before marking paid so a missing attachment cannot leave status paid + error.
+  const pdfBase64 = resolvePaymentReceivedPdf({
+    invoice: input.invoice,
+    settings: input.settings,
+    clientRow: input.clientRow,
+    pdfBase64: input.pdfBase64,
+    allowServerPdfFallback: input.allowServerPdfFallback,
+    requirePdf: shouldEmail,
+  });
+
+  const paidAt = new Date().toISOString().split('T')[0];
+  const { data: updatedRows, error: updateError } = await input.supabase
+    .from('invoices')
+    .update({ status: 'paid', paid_at: paidAt })
+    .eq('id', input.invoice.id)
+    .neq('status', 'paid')
+    .select('id');
+
+  if (updateError) throw updateError;
+
+  const markedPaidNow = (updatedRows?.length ?? 0) > 0;
+  input.invoice.status = 'paid';
+  input.invoice.paid_at = paidAt;
+
+  // Skip email if another request already marked paid and already sent payment_received.
+  if (!shouldEmail || !pdfBase64) return;
+  if (!markedPaidNow) {
+    // Do not retry large attachments from already-paid confirms — that path is unbounded.
+    return;
+  }
+
+  try {
+    await sendPaymentReceivedEmail({
+      supabase: input.supabase,
+      resendApiKey: input.resendApiKey,
+      invoice: input.invoice,
+      settings: input.settings,
+      clientRow: input.clientRow,
+      pdfBase64,
+    });
+  } catch (emailError) {
+    // Payment is already confirmed; receipt can be resent from the app if needed.
+    console.error('payment_received email failed after mark paid', emailError);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -511,10 +623,12 @@ Deno.serve(async (req) => {
       action?: string;
       token?: string;
       orderId?: string;
+      pdfBase64?: string;
     };
     const action = body.action?.trim();
     const token = body.token?.trim();
     const orderId = body.orderId?.trim();
+    const pdfBase64 = body.pdfBase64?.trim() ?? '';
 
     if (!action || !token) {
       return jsonResponse({ error: 'Action and token are required.' }, 400);
@@ -617,18 +731,21 @@ Deno.serve(async (req) => {
     if (action === 'preview_confirm_payment') {
       const { data: invoice, error } = await supabase
         .from('invoices')
-        .select('user_id, client_id, client_name, number, status')
+        .select(INVOICE_PUBLIC_SELECT)
         .eq('owner_confirm_token', token)
         .maybeSingle();
 
       if (error) throw error;
       if (!invoice) return jsonResponse({ error: 'Confirmation link is invalid or expired.' }, 404);
 
-      const clientRow = await fetchClientForInvoice(
-        supabase,
-        String(invoice.user_id),
-        invoice.client_id as string | null
-      );
+      const [settings, clientRow] = await Promise.all([
+        fetchUserSettingsForPublic(supabase, String(invoice.user_id)),
+        fetchClientForInvoice(
+          supabase,
+          String(invoice.user_id),
+          invoice.client_id as string | null
+        ),
+      ]);
 
       return jsonResponse({
         ok: true,
@@ -636,6 +753,7 @@ Deno.serve(async (req) => {
         clientName: clientDisplayName(clientRow, String(invoice.client_name)),
         status: String(invoice.status),
         alreadyPaid: invoice.status === 'paid',
+        ...toPublicPayload(invoice, settings, clientRow),
       });
     }
 
@@ -647,22 +765,13 @@ Deno.serve(async (req) => {
       const { data: invoice, error } = await supabase
         .from('invoices')
         .select(
-          'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, owner_confirm_token, created_at'
+          'id, user_id, client_id, client_name, number, issue_date, due_date, line_items, notes, tax_enabled, tax_rate, status, public_token, owner_confirm_token, created_at, is_historical, last_email_sent_kind'
         )
         .eq('owner_confirm_token', token)
         .maybeSingle();
 
       if (error) throw error;
       if (!invoice) return jsonResponse({ error: 'Confirmation link is invalid or expired.' }, 404);
-
-      if (invoice.status === 'paid') {
-        return jsonResponse({
-          ok: true,
-          alreadyPaid: true,
-          invoiceNumber: invoice.number,
-          clientName: String(invoice.client_name),
-        });
-      }
 
       const [settings, clientRow] = await Promise.all([
         fetchUserSettingsForPublic(supabase, String(invoice.user_id), {
@@ -671,12 +780,25 @@ Deno.serve(async (req) => {
         fetchClientForInvoice(supabase, String(invoice.user_id), invoice.client_id as string | null),
       ]);
 
+      // Already paid: do not re-attach large PDFs / re-hit Resend from this public token.
+      if (invoice.status === 'paid') {
+        return jsonResponse({
+          ok: true,
+          alreadyPaid: true,
+          invoiceNumber: invoice.number,
+          clientName: clientDisplayName(clientRow, String(invoice.client_name)),
+        });
+      }
+
       await markInvoicePaidAndNotifyClient({
         supabase,
         resendApiKey,
         invoice,
         settings,
         clientRow,
+        pdfBase64: pdfBase64 || undefined,
+        // Must use the confirmation page html2canvas capture (same as Download).
+        allowServerPdfFallback: false,
       });
 
       return jsonResponse({
@@ -795,6 +917,7 @@ Deno.serve(async (req) => {
         invoice,
         settings,
         clientRow,
+        allowServerPdfFallback: true,
       });
 
       return jsonResponse({

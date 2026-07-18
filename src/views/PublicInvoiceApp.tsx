@@ -19,6 +19,7 @@ import {
 } from '@/lib/publicInvoice';
 import { formatUnknownError } from '@/lib/errors';
 import { resolveStatus } from '@/lib/invoice';
+import { generateEmailInvoicePdfBase64, INVOICE_PDF_CAPTURE_WIDTH_PX } from '@/lib/pdf';
 import type { Settings } from '@/types';
 
 type PublicRoute =
@@ -226,6 +227,8 @@ function ConfirmPaymentPage({ token }: { token: string }) {
     alreadyPaid: boolean;
   } | null>(null);
 
+  const paidPrintId = 'confirm-payment-invoice-pdf';
+
   useEffect(() => {
     let cancelled = false;
 
@@ -261,7 +264,17 @@ function ConfirmPaymentPage({ token }: { token: string }) {
     setError(null);
 
     try {
-      const response = await confirmPublicPayment(token);
+      if (!preview?.payload || !document.getElementById(paidPrintId)) {
+        throw new Error('Invoice preview is not ready. Refresh and try again.');
+      }
+
+      await document.fonts.ready;
+      const pdfBase64 = await generateEmailInvoicePdfBase64(`#${paidPrintId}`);
+      if (!pdfBase64.trim()) {
+        throw new Error('Failed to create the paid invoice PDF. Refresh and try again.');
+      }
+
+      const response = await confirmPublicPayment(token, pdfBase64);
       setPreview(null);
       setResult(response);
     } catch (err) {
@@ -271,8 +284,36 @@ function ConfirmPaymentPage({ token }: { token: string }) {
     }
   };
 
+  const paidInvoice =
+    preview?.payload != null
+      ? {
+          ...publicInvoiceToInvoice(preview.payload.invoice),
+          status: 'paid' as const,
+          paidAt: new Date().toISOString().split('T')[0],
+        }
+      : null;
+  const paidClient = preview?.payload
+    ? publicClientToClient(preview.payload.client, preview.payload.invoice)
+    : null;
+  const paidSettings = preview?.payload ? toSettings(preview.payload) : null;
+
   return (
     <div className="min-h-screen bg-[#f5f5f7] flex items-center justify-center px-4">
+      {paidInvoice && paidSettings && (
+        <div
+          className="invoice-print-capture-root"
+          style={{ width: INVOICE_PDF_CAPTURE_WIDTH_PX }}
+          aria-hidden="true"
+        >
+          <InvoicePrintDocument
+            invoice={paidInvoice}
+            client={paidClient}
+            settings={paidSettings}
+            printId={paidPrintId}
+          />
+        </div>
+      )}
+
       <div className="w-full max-w-md rounded border border-border bg-white p-8 shadow-sm">
         {loadingPreview && (
           <p className="text-[13px] text-muted-foreground">Loading confirmation…</p>
@@ -397,8 +438,12 @@ export function PublicInvoiceApp({ route }: PublicInvoiceAppProps) {
 }
 
 export function getPublicRoute(): PublicRoute | null {
-  const { pathname } = window.location;
+  const { pathname, search } = window.location;
+  const params = new URLSearchParams(search);
+  const paymentSentQuery =
+    params.get('payment') === 'sent' || params.get('action') === 'payment-sent';
 
+  // Legacy nested path (still accepted for older emails)
   const paymentSentMatch = pathname.match(/^\/i\/([0-9a-f-]{36})\/payment-sent\/?$/i);
   if (paymentSentMatch) {
     return { kind: 'payment-sent', token: paymentSentMatch[1] };
@@ -406,7 +451,10 @@ export function getPublicRoute(): PublicRoute | null {
 
   const invoiceMatch = pathname.match(/^\/i\/([0-9a-f-]{36})\/?$/i);
   if (invoiceMatch) {
-    return { kind: 'invoice', token: invoiceMatch[1] };
+    return {
+      kind: paymentSentQuery ? 'payment-sent' : 'invoice',
+      token: invoiceMatch[1],
+    };
   }
 
   const confirmMatch = pathname.match(/^\/confirm-payment\/([0-9a-f-]{36})\/?$/i);

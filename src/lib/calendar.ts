@@ -308,6 +308,20 @@ export function recurringInvoiceCalendarEntries(
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** Keep imported line items aligned with their source calendar entries. */
+export function refreshImportedLineItemsFromCalendar(
+  lineItems: LineItem[],
+  calendarEntries: CalendarEntry[]
+): LineItem[] {
+  return lineItems.map((item) => {
+    if (!item.sourceCalendarEntryId) return item;
+    const entry = calendarEntries.find(
+      (calendarEntry) => calendarEntry.id === item.sourceCalendarEntryId
+    );
+    return entry ? calendarEntryToLineItem(entry, item.id) : item;
+  });
+}
+
 export function syncRecurringImportedLineItems(
   prev: LineItem[],
   calendarEntries: CalendarEntry[],
@@ -336,7 +350,9 @@ export function syncRecurringImportedLineItems(
     return !entry || !isRecurringCalendarEntry(entry);
   });
 
-  if (importedRecurring.length === 0) return kept;
+  const refreshedKept = refreshImportedLineItemsFromCalendar(kept, calendarEntries);
+
+  if (importedRecurring.length === 0) return refreshedKept;
 
   const mergedRecurring = importedRecurring.map((item) => {
     const existing = prunedPrev.find(
@@ -345,7 +361,7 @@ export function syncRecurringImportedLineItems(
     return existing ? { ...item, id: existing.id } : item;
   });
 
-  return [...mergedRecurring, ...kept].sort((a, b) =>
+  return [...mergedRecurring, ...refreshedKept].sort((a, b) =>
     (a.sourceDate ?? '').localeCompare(b.sourceDate ?? '')
   );
 }

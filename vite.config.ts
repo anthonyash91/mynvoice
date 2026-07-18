@@ -10,4 +10,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    port: 5173,
+    // Fail instead of silently moving to :5174/:5175 — email links use localhost:5173.
+    strictPort: true,
+  },
 });

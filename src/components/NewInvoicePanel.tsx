@@ -660,6 +660,13 @@ export function NewInvoicePanel({
                       client={editClient}
                       onSave={async (entry) => {
                         await onUpdateCalendarEntry(entry);
+                        setLineItems((prev) =>
+                          prev.map((lineItem) =>
+                            lineItem.id === item.id
+                              ? calendarEntryToLineItem(entry, lineItem.id)
+                              : lineItem
+                          )
+                        );
                         setEditingLineItemId(null);
                       }}
                       onCancel={async () => {
