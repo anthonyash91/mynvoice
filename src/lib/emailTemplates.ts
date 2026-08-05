@@ -245,7 +245,8 @@ function resolveTemplateField(
 }
 
 function resolveTemplateCss(kind: EmailTemplateKind, value: string | undefined): string {
-  if (value !== undefined) return value;
+  const trimmed = value?.trim();
+  if (trimmed) return trimmed;
   return DEFAULT_EMAIL_TEMPLATES[kind].css;
 }
 

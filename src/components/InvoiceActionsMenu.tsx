@@ -321,20 +321,22 @@ export function InvoiceActionsMenu({
 
   return (
     <>
-      {pdfCaptureActive && (
-        <div
-          className="invoice-print-capture-root"
-          style={{ width: INVOICE_PDF_CAPTURE_WIDTH_PX }}
-          aria-hidden="true"
-        >
-          <InvoicePrintDocument
-            invoice={pdfCaptureInvoice ?? invoice}
-            client={client}
-            settings={settings}
-            printId={`invoice-pdf-${invoice.id}`}
-          />
-        </div>
-      )}
+      {pdfCaptureActive &&
+        createPortal(
+          <div
+            className="invoice-print-capture-root"
+            style={{ width: INVOICE_PDF_CAPTURE_WIDTH_PX }}
+            aria-hidden="true"
+          >
+            <InvoicePrintDocument
+              invoice={pdfCaptureInvoice ?? invoice}
+              client={client}
+              settings={settings}
+              printId={`invoice-pdf-${invoice.id}`}
+            />
+          </div>,
+          document.body
+        )}
 
       <div
         className="relative shrink-0"

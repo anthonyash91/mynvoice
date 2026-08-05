@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { InvoicePrintDocument } from '@/components/InvoicePrintDocument';
@@ -299,20 +300,23 @@ function ConfirmPaymentPage({ token }: { token: string }) {
 
   return (
     <div className="min-h-screen bg-[#f5f5f7] flex items-center justify-center px-4">
-      {paidInvoice && paidSettings && (
-        <div
-          className="invoice-print-capture-root"
-          style={{ width: INVOICE_PDF_CAPTURE_WIDTH_PX }}
-          aria-hidden="true"
-        >
-          <InvoicePrintDocument
-            invoice={paidInvoice}
-            client={paidClient}
-            settings={paidSettings}
-            printId={paidPrintId}
-          />
-        </div>
-      )}
+      {paidInvoice &&
+        paidSettings &&
+        createPortal(
+          <div
+            className="invoice-print-capture-root"
+            style={{ width: INVOICE_PDF_CAPTURE_WIDTH_PX }}
+            aria-hidden="true"
+          >
+            <InvoicePrintDocument
+              invoice={paidInvoice}
+              client={paidClient}
+              settings={paidSettings}
+              printId={paidPrintId}
+            />
+          </div>,
+          document.body
+        )}
 
       <div className="w-full max-w-md rounded border border-border bg-white p-8 shadow-sm">
         {loadingPreview && (

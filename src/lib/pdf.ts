@@ -1,9 +1,10 @@
 import { applyPdfPageBreakAvoidance } from '@/lib/pdfPageBreaks';
+import invoicePrintCss from '@/styles/invoice-print.css?raw';
 
 const INVOICE_PADDING = 40;
 /** Same scale/quality for Download and every email attachment. */
-const CAPTURE_SCALE = 1.5;
-const JPEG_QUALITY = 0.84;
+const CAPTURE_SCALE = 2;
+const JPEG_QUALITY = 0.92;
 /** ~5 MB decoded — matches send-invoice attachment cap. */
 const MAX_EMAIL_PDF_BASE64_CHARS = Math.ceil(5 * 1024 * 1024 * (4 / 3));
 
@@ -46,8 +47,27 @@ function sliceCanvas(
 
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, slice.width, slice.height);
-  ctx.drawImage(source, 0, y, source.width, height, 0, 0, slice.width, height);
+  ctx.drawImage(source, 0, y, slice.width, height, 0, 0, slice.width, height);
   return slice;
+}
+
+function waitForImages(root: HTMLElement): Promise<void> {
+  const images = [...root.querySelectorAll('img')];
+  if (images.length === 0) return Promise.resolve();
+
+  return Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve();
+            return;
+          }
+          img.addEventListener('load', () => resolve(), { once: true });
+          img.addEventListener('error', () => resolve(), { once: true });
+        })
+    )
+  ).then(() => undefined);
 }
 
 async function captureInvoicePdf(
@@ -74,19 +94,34 @@ async function captureInvoicePdf(
   container.style.padding = `${INVOICE_PDF_PADDING_PX}px`;
   container.style.background = '#ffffff';
   container.style.boxSizing = 'border-box';
+  // Force layout on body — never inherit panel overflow/transform containing blocks.
+  container.style.position = 'fixed';
+  container.style.left = '-10000px';
+  container.style.top = '0';
+  container.style.zIndex = '-1';
+  container.style.pointerEvents = 'none';
+  container.style.opacity = '1';
+
+  // Self-contained print CSS so capture never depends on stylesheet cloning.
+  const style = document.createElement('style');
+  style.textContent = invoicePrintCss;
+  container.appendChild(style);
 
   const clone = source.cloneNode(true) as HTMLElement;
   clone.classList.add('invoice-print-capture');
   clone.style.width = '100%';
+  clone.style.background = '#ffffff';
+  clone.style.color = '#111111';
 
   container.appendChild(clone);
   document.body.appendChild(container);
 
   try {
     await document.fonts.ready;
+    await waitForImages(container);
     applyPdfPageBreakAvoidance(container, INVOICE_PDF_CAPTURE_WIDTH_PX);
 
-    const captureHeight = container.scrollHeight;
+    const captureHeight = Math.max(container.scrollHeight, clone.scrollHeight + INVOICE_PDF_PADDING_PX * 2);
 
     const canvas = await html2canvas(container, {
       scale,
@@ -97,12 +132,27 @@ async function captureInvoicePdf(
       height: captureHeight,
       windowWidth: INVOICE_PDF_CAPTURE_WIDTH_PX,
       windowHeight: captureHeight,
-      onclone: (_doc, node) => {
+      onclone: (doc, node) => {
         const el = node as HTMLElement;
         el.style.overflow = 'visible';
         el.style.height = 'auto';
+        el.style.opacity = '1';
+        el.style.left = '0';
+        el.style.position = 'static';
+
+        // Re-inject print CSS inside the cloned document as a fallback.
+        if (!doc.getElementById('invoice-print-pdf-styles')) {
+          const clonedStyle = doc.createElement('style');
+          clonedStyle.id = 'invoice-print-pdf-styles';
+          clonedStyle.textContent = invoicePrintCss;
+          doc.head.appendChild(clonedStyle);
+        }
       },
     });
+
+    if (canvas.width < 10 || canvas.height < 10) {
+      throw new Error('Failed to render invoice PDF. Try again in a moment.');
+    }
 
     const pdf = new jsPDF('p', 'mm', 'a4') as unknown as JsPdfInstance;
     const pageSliceHeightPx = Math.max(
