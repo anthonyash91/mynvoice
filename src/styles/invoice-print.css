@@ -6,10 +6,16 @@
 }
 
 .invoice-print {
+  /* Match app body font (styles.css --font-sans). Explicit stack for PDF capture. */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Inter',
+    system-ui, sans-serif;
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.4;
   color: #111111;
   background: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .invoice-print-muted {
@@ -22,6 +28,7 @@
 }
 
 .invoice-print-mono {
+  /* Match app --font-mono */
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   margin-top: 4px;
 }
@@ -143,6 +150,14 @@
 .invoice-print-description {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.invoice-print-line-date {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #6e6e73;
+  font-variant-numeric: tabular-nums;
 }
 
 .invoice-print-qty-rate,

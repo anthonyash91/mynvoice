@@ -23,3 +23,13 @@ export function lineItemKindFromCalendarEntry(
   if (entry.entryType === 'fixed') return 'fixed';
   return 'hourly';
 }
+
+/** Calendar date on invoices. Fixed one-offs omit dates; recurring keeps them. */
+export function lineItemInvoiceDate(
+  item: Pick<LineItem, 'entryType' | 'sourceRecurringLineItemId' | 'sourceDate'>
+): string | null {
+  const date = item.sourceDate?.trim();
+  if (!date) return null;
+  if (item.entryType === 'fixed' && !item.sourceRecurringLineItemId) return null;
+  return date;
+}

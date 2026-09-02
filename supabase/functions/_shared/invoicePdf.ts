@@ -8,6 +8,8 @@ type LineItem = {
   entryType?: string;
   source_recurring_line_item_id?: string | null;
   sourceRecurringLineItemId?: string | null;
+  source_date?: string | null;
+  sourceDate?: string | null;
 };
 
 type InvoicePdfInput = {
@@ -42,6 +44,15 @@ function formatCurrency(amount: number): string {
     style: 'currency',
     currency: 'USD',
   }).format(amount);
+}
+
+function formatDate(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function formatDateLong(value: string): string {
@@ -82,6 +93,14 @@ function lineItemEntryType(item: LineItem): string {
 
 function isRecurringLineItem(item: LineItem): boolean {
   return Boolean(item.source_recurring_line_item_id ?? item.sourceRecurringLineItemId);
+}
+
+/** Calendar date on invoices. Fixed one-offs omit dates; recurring keeps them. */
+function lineItemInvoiceDate(item: LineItem): string | null {
+  const date = String(item.source_date ?? item.sourceDate ?? '').trim();
+  if (!date) return null;
+  if (lineItemEntryType(item) === 'fixed' && !isRecurringLineItem(item)) return null;
+  return date;
 }
 
 function formatLineItemQtyRate(item: LineItem): string {
@@ -345,6 +364,7 @@ export function generateInvoicePdfBase64(input: InvoicePdfInput): string {
 
   for (const item of lineItems) {
     const description = String(item.description ?? '');
+    const itemDate = lineItemInvoiceDate(item);
     const qtyRate = formatLineItemQtyRate(item);
     const amount = formatCurrency(Number(item.quantity ?? 0) * Number(item.rate ?? 0));
 
@@ -353,11 +373,19 @@ export function generateInvoicePdfBase64(input: InvoicePdfInput): string {
     doc.setTextColor(17, 17, 17);
 
     const descLines = doc.splitTextToSize(description, contentWidth * 0.5);
-    const rowHeight = Math.max(descLines.length * 4.5, 6);
+    const dateHeight = itemDate ? 4 : 0;
+    const rowHeight = Math.max(descLines.length * 4.5 + dateHeight, 6);
     ensureSpace(rowHeight + 2);
 
     const rowY = y;
     doc.text(descLines, colDesc, rowY);
+    if (itemDate) {
+      doc.setFontSize(8);
+      doc.setTextColor(110, 110, 115);
+      doc.text(formatDate(itemDate), colDesc, rowY + descLines.length * 4.5);
+      doc.setFontSize(9);
+      doc.setTextColor(17, 17, 17);
+    }
     doc.text(qtyRate, colQty, rowY);
     doc.text(amount, colAmount, rowY, { align: 'right' });
     y += rowHeight + 3;

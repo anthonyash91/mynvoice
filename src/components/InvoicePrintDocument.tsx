@@ -5,12 +5,13 @@ import {
   buildRateBreakdown,
   calculateTotal,
   formatCurrency,
+  formatDate,
   formatDateLong,
   lineItemAmount,
 } from '@/lib/calculations';
 import { formatDurationQuantity, formatInvoiceQuantity } from '@/lib/duration';
 import { splitStreetAndCityLines } from '@/lib/address';
-import { LINE_ITEM_KIND_LABEL, lineItemKindFromLineItem } from '@/lib/lineItem';
+import { LINE_ITEM_KIND_LABEL, lineItemInvoiceDate, lineItemKindFromLineItem } from '@/lib/lineItem';
 import type { Client, Invoice, LineItem, Settings } from '@/types';
 
 function formatLineItemQtyRate(item: LineItem): string {
@@ -111,18 +112,26 @@ export function InvoicePrintDocument({
           <div>Qty/Rate</div>
           <div>Amount</div>
         </div>
-        {invoice.lineItems.map((item) => (
-          <div key={item.id} className="invoice-print-line-row invoice-print-pdf-avoid-break">
-            <div className="invoice-print-description">{item.description}</div>
-            <div aria-hidden="true" />
-            <div className="invoice-print-num invoice-print-qty-rate">
-              {formatLineItemQtyRate(item)}
+        {invoice.lineItems.map((item) => {
+          const itemDate = lineItemInvoiceDate(item);
+          return (
+            <div key={item.id} className="invoice-print-line-row invoice-print-pdf-avoid-break">
+              <div className="invoice-print-description">
+                <div>{item.description}</div>
+                {itemDate && (
+                  <div className="invoice-print-line-date">{formatDate(itemDate)}</div>
+                )}
+              </div>
+              <div aria-hidden="true" />
+              <div className="invoice-print-num invoice-print-qty-rate">
+                {formatLineItemQtyRate(item)}
+              </div>
+              <div className="invoice-print-num invoice-print-amount">
+                {formatCurrency(lineItemAmount(item))}
+              </div>
             </div>
-            <div className="invoice-print-num invoice-print-amount">
-              {formatCurrency(lineItemAmount(item))}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </section>
 
       {rateBreakdown.length > 0 && (

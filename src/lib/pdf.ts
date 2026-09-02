@@ -112,6 +112,12 @@ async function captureInvoicePdf(
   clone.style.width = '100%';
   clone.style.background = '#ffffff';
   clone.style.color = '#111111';
+  // Inline the app font stack so html2canvas cannot fall back to a browser default.
+  clone.style.fontFamily =
+    '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, sans-serif';
+  clone.style.fontWeight = '400';
+  clone.style.setProperty('-webkit-font-smoothing', 'antialiased');
+  clone.style.setProperty('-moz-osx-font-smoothing', 'grayscale');
 
   container.appendChild(clone);
   document.body.appendChild(container);
@@ -119,7 +125,12 @@ async function captureInvoicePdf(
   try {
     await document.fonts.ready;
     await waitForImages(container);
-    applyPdfPageBreakAvoidance(container, INVOICE_PDF_CAPTURE_WIDTH_PX);
+    applyPdfPageBreakAvoidance(
+      container,
+      INVOICE_PDF_CAPTURE_WIDTH_PX,
+      '.invoice-print-pdf-avoid-break',
+      INVOICE_PDF_PADDING_PX
+    );
 
     const captureHeight = Math.max(container.scrollHeight, clone.scrollHeight + INVOICE_PDF_PADDING_PX * 2);
 
@@ -139,6 +150,14 @@ async function captureInvoicePdf(
         el.style.opacity = '1';
         el.style.left = '0';
         el.style.position = 'static';
+        el.style.fontFamily =
+          '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, sans-serif';
+
+        const print = el.querySelector('.invoice-print') as HTMLElement | null;
+        if (print) {
+          print.style.fontFamily =
+            '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, sans-serif';
+        }
 
         // Re-inject print CSS inside the cloned document as a fallback.
         if (!doc.getElementById('invoice-print-pdf-styles')) {

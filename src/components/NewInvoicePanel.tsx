@@ -26,7 +26,7 @@ import { formatDurationQuantity } from '@/lib/duration';
 import { clientInvoiceName } from '@/lib/client';
 import { ImportedLineItemEditForm } from '@/components/ImportedLineItemEditForm';
 import { LineItemTypeBadge } from '@/components/LineItemTypeBadge';
-import { lineItemKindFromLineItem } from '@/lib/lineItem';
+import { lineItemInvoiceDate, lineItemKindFromLineItem } from '@/lib/lineItem';
 import {
   addableCalendarEntriesForInvoice,
   calendarEntriesToLineItems,
@@ -116,6 +116,12 @@ function ImportedInvoiceLineItem({ item }: { item: LineItem }) {
   const descriptionRef = useRef<HTMLDivElement>(null);
   const isFixed = item.entryType === 'fixed';
   const amount = isFixed ? item.rate : item.quantity * item.rate;
+  const itemDate = lineItemInvoiceDate(item);
+  const metaParts = [
+    itemDate ? formatDate(itemDate) : null,
+    !isFixed ? formatDurationQuantity(item.quantity) : null,
+    importedLineItemRateLabel(item),
+  ].filter(Boolean);
 
   return (
     <>
@@ -129,11 +135,9 @@ function ImportedInvoiceLineItem({ item }: { item: LineItem }) {
           <div ref={descriptionRef} className="truncate">
             {item.description}
           </div>
-          {item.sourceDate && (
+          {metaParts.length > 0 && (
             <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground tabular-nums">
-              {formatDate(item.sourceDate)}
-              {!isFixed && ` · ${formatDurationQuantity(item.quantity)}`}
-              {` · ${importedLineItemRateLabel(item)}`}
+              {metaParts.join(' · ')}
             </div>
           )}
         </div>
