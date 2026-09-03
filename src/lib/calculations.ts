@@ -76,6 +76,14 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+/** Split currency for decimal-column alignment on printed invoices. */
+export function formatCurrencyParts(amount: number): { int: string; dec: string } {
+  const formatted = formatCurrency(amount);
+  const dot = formatted.lastIndexOf('.');
+  if (dot < 0) return { int: formatted, dec: '' };
+  return { int: formatted.slice(0, dot), dec: formatted.slice(dot) };
+}
+
 export function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
   return date.toLocaleDateString('en-US', {

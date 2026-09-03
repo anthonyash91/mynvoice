@@ -70,6 +70,125 @@ function waitForImages(root: HTMLElement): Promise<void> {
   ).then(() => undefined);
 }
 
+type PdfTextPaint = {
+  text: string;
+  right: number;
+  top: number;
+  width: number;
+  height: number;
+  strong: boolean;
+};
+
+const MONEY_PAINT_SELECTOR = [
+  '.invoice-print-line-row .invoice-print-amount',
+  '.invoice-print-header-amount',
+  '.invoice-print-totals td',
+  '.invoice-print-rate-breakdown td:nth-child(3)',
+].join(', ');
+
+const QTY_PAINT_SELECTOR = '.invoice-print-line-row .invoice-print-qty-rate';
+
+/** Pin numeric column widths before capture. */
+function lockInvoiceMoneyColumns(root: HTMLElement): void {
+  const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const qtyWidthPx = `${Math.round(10 * rootFontSize)}px`;
+  const amountWidthPx = `${Math.round(8 * rootFontSize)}px`;
+  const hoursWidthPx = `${Math.round(4.5 * rootFontSize)}px`;
+
+  const pinBox = (el: HTMLElement, widthPx: string) => {
+    el.style.boxSizing = 'border-box';
+    el.style.width = widthPx;
+    el.style.minWidth = widthPx;
+    el.style.maxWidth = widthPx;
+    el.style.flex = `0 0 ${widthPx}`;
+    el.style.whiteSpace = 'nowrap';
+    if (el.tagName !== 'TD' && el.tagName !== 'TH') {
+      el.style.display = 'block';
+    }
+  };
+
+  root.querySelectorAll<HTMLElement>('.invoice-print-qty-rate').forEach((el) => {
+    pinBox(el, qtyWidthPx);
+  });
+  root
+    .querySelectorAll<HTMLElement>(
+      '.invoice-print-amount, .invoice-print-header-amount, .invoice-print-totals td, .invoice-print-rate-breakdown th:nth-child(3), .invoice-print-rate-breakdown td:nth-child(3)'
+    )
+    .forEach((el) => {
+      pinBox(el, amountWidthPx);
+    });
+  root
+    .querySelectorAll<HTMLElement>(
+      '.invoice-print-rate-breakdown th:nth-child(2), .invoice-print-rate-breakdown td:nth-child(2)'
+    )
+    .forEach((el) => {
+      pinBox(el, hoursWidthPx);
+    });
+}
+
+function collectRightAlignedPaints(root: HTMLElement, selector: string): PdfTextPaint[] {
+  const rootRect = root.getBoundingClientRect();
+  const paints: PdfTextPaint[] = [];
+
+  for (const el of root.querySelectorAll<HTMLElement>(selector)) {
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text || /^(amount|total|qty\/rate)$/i.test(text)) continue;
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+
+    const strong =
+      el.classList.contains('invoice-print-strong') ||
+      el.classList.contains('invoice-print-header-amount') ||
+      Boolean(el.closest('.invoice-print-total-grand'));
+
+    paints.push({
+      text,
+      right: rect.right - rootRect.left,
+      top: rect.top - rootRect.top,
+      width: rect.width,
+      height: rect.height,
+      strong,
+    });
+
+    // Hide DOM text — html2canvas mis-paints alignment; we redraw on the canvas.
+    el.style.color = 'transparent';
+  }
+
+  return paints;
+}
+
+/** html2canvas can't reliably right-align currency — paint with canvas textAlign. */
+function paintRightAlignedTexts(
+  canvas: HTMLCanvasElement,
+  paints: PdfTextPaint[],
+  cssWidthPx: number,
+  fontFamily: string
+): void {
+  if (paints.length === 0) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const scale = canvas.width / cssWidthPx;
+
+  for (const paint of paints) {
+    const right = paint.right * scale;
+    const top = paint.top * scale;
+    const width = paint.width * scale;
+    const height = Math.max(paint.height * scale, 14 * scale);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(right - width - 2 * scale, top - scale, width + 4 * scale, height + 2 * scale);
+
+    const fontSize = 13 * scale;
+    ctx.fillStyle = '#111111';
+    ctx.font = `${paint.strong ? '500' : '400'} ${fontSize}px ${fontFamily}`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(paint.text, right, top + height / 2);
+  }
+}
+
 async function captureInvoicePdf(
   sourceSelector = '.invoice-print',
   options: PdfCaptureOptions = {}
@@ -125,12 +244,17 @@ async function captureInvoicePdf(
   try {
     await document.fonts.ready;
     await waitForImages(container);
+    lockInvoiceMoneyColumns(container);
     applyPdfPageBreakAvoidance(
       container,
       INVOICE_PDF_CAPTURE_WIDTH_PX,
       '.invoice-print-pdf-avoid-break',
       INVOICE_PDF_PADDING_PX
     );
+
+    // Collect after page-break pushes so paint coordinates match final layout.
+    const moneyPaints = collectRightAlignedPaints(container, MONEY_PAINT_SELECTOR);
+    const qtyPaints = collectRightAlignedPaints(container, QTY_PAINT_SELECTOR);
 
     const captureHeight = Math.max(container.scrollHeight, clone.scrollHeight + INVOICE_PDF_PADDING_PX * 2);
 
@@ -166,12 +290,27 @@ async function captureInvoicePdf(
           clonedStyle.textContent = invoicePrintCss;
           doc.head.appendChild(clonedStyle);
         }
+
+        lockInvoiceMoneyColumns(el);
+        // Keep money/qty invisible in the clone too (coordinates already collected).
+        for (const nodeEl of el.querySelectorAll<HTMLElement>(
+          `${MONEY_PAINT_SELECTOR}, ${QTY_PAINT_SELECTOR}`
+        )) {
+          const text = (nodeEl.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!text || /^(amount|total|qty\/rate)$/i.test(text)) continue;
+          nodeEl.style.color = 'transparent';
+        }
       },
     });
 
     if (canvas.width < 10 || canvas.height < 10) {
       throw new Error('Failed to render invoice PDF. Try again in a moment.');
     }
+
+    const sansFont =
+      '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Inter, system-ui, sans-serif';
+    paintRightAlignedTexts(canvas, qtyPaints, INVOICE_PDF_CAPTURE_WIDTH_PX, sansFont);
+    paintRightAlignedTexts(canvas, moneyPaints, INVOICE_PDF_CAPTURE_WIDTH_PX, sansFont);
 
     const pdf = new jsPDF('p', 'mm', 'a4') as unknown as JsPdfInstance;
     const pageSliceHeightPx = Math.max(

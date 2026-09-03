@@ -5,6 +5,7 @@ import {
   buildRateBreakdown,
   calculateTotal,
   formatCurrency,
+  formatCurrencyParts,
   formatDate,
   formatDateLong,
   lineItemAmount,
@@ -13,6 +14,25 @@ import { formatDurationQuantity, formatInvoiceQuantity } from '@/lib/duration';
 import { splitStreetAndCityLines } from '@/lib/address';
 import { LINE_ITEM_KIND_LABEL, lineItemInvoiceDate, lineItemKindFromLineItem } from '@/lib/lineItem';
 import type { Client, Invoice, LineItem, Settings } from '@/types';
+
+function PrintMoney({
+  amount,
+  suffix = '',
+  className = '',
+}: {
+  amount: number;
+  suffix?: string;
+  className?: string;
+}) {
+  const { int, dec } = formatCurrencyParts(amount);
+  return (
+    <span className={`invoice-print-money${className ? ` ${className}` : ''}`}>
+      <span className="invoice-print-money-int">{int}</span>
+      <span className="invoice-print-money-dec">{dec}</span>
+      {suffix ? <span className="invoice-print-money-suffix">{suffix}</span> : null}
+    </span>
+  );
+}
 
 function formatLineItemQtyRate(item: LineItem): string {
   if (lineItemKindFromLineItem(item) === 'recurring' && item.entryType === 'fixed') {
@@ -61,7 +81,7 @@ export function InvoicePrintDocument({
           </div>
           <div className="invoice-print-header-column invoice-print-header-column-right">
             <div className="invoice-print-header-line invoice-print-strong invoice-print-header-amount">
-              {formatCurrency(totals.total)}
+              <PrintMoney amount={totals.total} />
             </div>
             <div className="invoice-print-header-line">
               <StatusLabel status={status} />
@@ -107,10 +127,9 @@ export function InvoicePrintDocument({
 
       <section className="invoice-print-section invoice-print-lines-section">
         <div className="invoice-print-lines-header">
-          <div>Description</div>
-          <div aria-hidden="true" />
-          <div>Qty/Rate</div>
-          <div>Amount</div>
+          <div className="invoice-print-description">Description</div>
+          <div className="invoice-print-qty-rate">Qty/Rate</div>
+          <div className="invoice-print-amount">Amount</div>
         </div>
         {invoice.lineItems.map((item) => {
           const itemDate = lineItemInvoiceDate(item);
@@ -122,12 +141,11 @@ export function InvoicePrintDocument({
                   <div className="invoice-print-line-date">{formatDate(itemDate)}</div>
                 )}
               </div>
-              <div aria-hidden="true" />
               <div className="invoice-print-num invoice-print-qty-rate">
                 {formatLineItemQtyRate(item)}
               </div>
               <div className="invoice-print-num invoice-print-amount">
-                {formatCurrency(lineItemAmount(item))}
+                <PrintMoney amount={lineItemAmount(item)} />
               </div>
             </div>
           );
@@ -136,55 +154,75 @@ export function InvoicePrintDocument({
 
       {rateBreakdown.length > 0 && (
         <section className="invoice-print-rate-breakdown-wrap invoice-print-pdf-avoid-break">
-          <div className="invoice-print-rate-breakdown">
-            <div className="invoice-print-rate-breakdown-header">
-              <div>Rate</div>
-              <div>Hours</div>
-              <div>Total</div>
-            </div>
-            {rateBreakdown.map((row) => (
-              <div
-                key={`${row.isRecurring ? 'recurring-' : ''}${row.entryType}-${row.rate}`}
-                className="invoice-print-rate-breakdown-row"
-              >
-                <div className="invoice-print-num">
-                  {row.entryType === 'fixed'
-                    ? formatCurrency(row.rate)
-                    : `${formatCurrency(row.rate)}/hr`}
-                </div>
-                <div className="invoice-print-num">
-                  {row.hours === null
-                    ? row.isRecurring
-                      ? LINE_ITEM_KIND_LABEL.recurring
-                      : '—'
-                    : formatDurationQuantity(row.hours)}
-                </div>
-                <div className="invoice-print-num">{formatCurrency(row.total)}</div>
-              </div>
-            ))}
-          </div>
+          <table className="invoice-print-rate-breakdown">
+            <thead>
+              <tr className="invoice-print-rate-breakdown-header">
+                <th scope="col">Rate</th>
+                <th scope="col">Hours</th>
+                <th scope="col">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rateBreakdown.map((row) => (
+                <tr
+                  key={`${row.isRecurring ? 'recurring-' : ''}${row.entryType}-${row.rate}`}
+                  className="invoice-print-rate-breakdown-row"
+                >
+                  <td className="invoice-print-num">
+                    {row.entryType === 'fixed' ? (
+                      <PrintMoney amount={row.rate} />
+                    ) : (
+                      <PrintMoney amount={row.rate} suffix="/hr" />
+                    )}
+                  </td>
+                  <td className="invoice-print-num">
+                    {row.hours === null
+                      ? row.isRecurring
+                        ? LINE_ITEM_KIND_LABEL.recurring
+                        : '—'
+                      : formatDurationQuantity(row.hours)}
+                  </td>
+                  <td className="invoice-print-num">
+                    <PrintMoney amount={row.total} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
 
       <section className="invoice-print-totals-wrap invoice-print-pdf-avoid-break">
-        <div className="invoice-print-totals">
-          <div className="invoice-print-total-row">
-            <span className="invoice-print-muted">Subtotal</span>
-            <span className="invoice-print-num">{formatCurrency(totals.subtotal)}</span>
-          </div>
-          {invoice.taxEnabled && (
-            <div className="invoice-print-total-row">
-              <span className="invoice-print-muted">Tax ({invoice.taxRate}%)</span>
-              <span className="invoice-print-num">{formatCurrency(totals.tax)}</span>
-            </div>
-          )}
-          <div className="invoice-print-total-row invoice-print-total-grand">
-            <span className="invoice-print-strong">Total due</span>
-            <span className="invoice-print-strong invoice-print-num">
-              {formatCurrency(totals.total)}
-            </span>
-          </div>
-        </div>
+        <table className="invoice-print-totals">
+          <tbody>
+            <tr className="invoice-print-total-row">
+              <th scope="row" className="invoice-print-muted">
+                Subtotal
+              </th>
+              <td className="invoice-print-num">
+                <PrintMoney amount={totals.subtotal} />
+              </td>
+            </tr>
+            {invoice.taxEnabled && (
+              <tr className="invoice-print-total-row">
+                <th scope="row" className="invoice-print-muted">
+                  Tax ({invoice.taxRate}%)
+                </th>
+                <td className="invoice-print-num">
+                  <PrintMoney amount={totals.tax} />
+                </td>
+              </tr>
+            )}
+            <tr className="invoice-print-total-row invoice-print-total-grand">
+              <th scope="row" className="invoice-print-strong">
+                Total due
+              </th>
+              <td className="invoice-print-strong invoice-print-num">
+                <PrintMoney amount={totals.total} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       {invoice.notes && (

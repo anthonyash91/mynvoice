@@ -141,13 +141,15 @@
 
 .invoice-print-lines-header,
 .invoice-print-line-row {
-  display: grid;
-  grid-template-columns: minmax(0, 26rem) 1fr 8.5rem 5.5rem;
+  display: flex;
+  align-items: flex-start;
   gap: 12px;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .invoice-print-description {
+  flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -162,13 +164,56 @@
 
 .invoice-print-qty-rate,
 .invoice-print-amount {
+  box-sizing: border-box;
+  flex: 0 0 auto;
   white-space: nowrap;
   text-align: right;
 }
 
-.invoice-print-lines-header > :nth-child(3),
-.invoice-print-lines-header > :nth-child(4) {
-  text-align: right;
+.invoice-print-qty-rate {
+  width: 9.5rem;
+  min-width: 9.5rem;
+  max-width: 9.5rem;
+}
+
+.invoice-print-amount {
+  width: 7.5rem;
+  min-width: 7.5rem;
+  max-width: 7.5rem;
+  position: relative;
+}
+
+/* Mono + fixed decimal slot; block + margin-left auto pins the right edge. */
+.invoice-print-money {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin-left: auto;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.invoice-print-money-dec {
+  display: inline-block;
+  width: 3ch;
+  text-align: left;
+}
+
+.invoice-print-header-amount .invoice-print-money {
+  margin-left: auto;
+}
+
+.invoice-print-amount,
+.invoice-print-header-amount,
+.invoice-print-totals td,
+.invoice-print-rate-breakdown td:nth-child(3) {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
+  letter-spacing: 0;
 }
 
 .invoice-print-lines-header {
@@ -184,7 +229,6 @@
 }
 
 .invoice-print-line-row {
-  align-items: start;
   padding-top: 8px;
   padding-bottom: 8px;
   border-top: 1px solid rgba(229, 229, 229, 0.6);
@@ -192,6 +236,7 @@
 
 .invoice-print-num {
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
 }
 
 .invoice-print-rate-breakdown-wrap {
@@ -202,28 +247,46 @@
 
 .invoice-print-rate-breakdown {
   width: 20rem;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.invoice-print-rate-breakdown-header,
-.invoice-print-rate-breakdown-row {
-  display: grid;
-  grid-template-columns: 1fr 4.5rem 5.5rem;
-  gap: 12px;
+.invoice-print-rate-breakdown th,
+.invoice-print-rate-breakdown td {
+  padding: 0;
+  text-align: right;
+  white-space: nowrap;
+  font-weight: inherit;
+  vertical-align: baseline;
 }
 
-.invoice-print-rate-breakdown-header {
+.invoice-print-rate-breakdown th:nth-child(1),
+.invoice-print-rate-breakdown td:nth-child(1) {
+  width: auto;
+}
+
+.invoice-print-rate-breakdown th:nth-child(2),
+.invoice-print-rate-breakdown td:nth-child(2) {
+  width: 4.5rem;
+  padding-left: 12px;
+}
+
+.invoice-print-rate-breakdown th:nth-child(3),
+.invoice-print-rate-breakdown td:nth-child(3) {
+  width: 7.5rem;
+  padding-left: 12px;
+}
+
+.invoice-print-rate-breakdown-header th {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: #6e6e73;
+  padding-bottom: 6px;
 }
 
-.invoice-print-rate-breakdown-header > div,
-.invoice-print-rate-breakdown-row > div {
-  text-align: right;
+.invoice-print-rate-breakdown-row td {
+  padding-top: 6px;
 }
 
 .invoice-print-totals-wrap {
@@ -236,20 +299,65 @@
 
 .invoice-print-totals {
   width: 256px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.invoice-print-total-row {
-  display: flex;
-  justify-content: space-between;
+.invoice-print-totals th,
+.invoice-print-totals td {
+  padding: 0;
+  font-weight: inherit;
+  vertical-align: baseline;
 }
 
-.invoice-print-total-grand {
+.invoice-print-totals th {
+  text-align: left;
+}
+
+.invoice-print-totals td {
+  width: 7.5rem;
+  text-align: right;
+  white-space: nowrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
+  letter-spacing: 0;
+}
+
+.invoice-print-total-row th,
+.invoice-print-total-row td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.invoice-print-total-grand th,
+.invoice-print-total-grand td {
   padding-top: 8px;
   border-top: 1px solid #e5e5e5;
-  margin-top: 4px;
+}
+
+/*
+  html2canvas often shrink-wraps flex/grid cells, so right edges look uneven.
+  Match the header capture workaround: block boxes + text-align with locked widths.
+*/
+.invoice-print-capture .invoice-print-qty-rate,
+.invoice-print-capture .invoice-print-amount {
+  display: block;
+  text-align: right;
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
+}
+
+.invoice-print-capture .invoice-print-totals td,
+.invoice-print-capture .invoice-print-rate-breakdown th,
+.invoice-print-capture .invoice-print-rate-breakdown td {
+  text-align: right;
+  font-variant-numeric: normal;
+  font-feature-settings: normal;
+}
+
+.invoice-print-capture .invoice-print-totals th {
+  text-align: left;
 }
 
 .invoice-print-footer {
