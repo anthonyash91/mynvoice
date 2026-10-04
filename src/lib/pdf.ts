@@ -74,9 +74,11 @@ type PdfTextPaint = {
   text: string;
   right: number;
   top: number;
-  width: number;
   height: number;
-  strong: boolean;
+  fontWeight: string;
+  fontSizePx: number;
+  fontFamily: string;
+  color: string;
 };
 
 const MONEY_PAINT_SELECTOR = [
@@ -134,21 +136,24 @@ function collectRightAlignedPaints(root: HTMLElement, selector: string): PdfText
     const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
     if (!text || /^(amount|total|qty\/rate)$/i.test(text)) continue;
 
-    const rect = el.getBoundingClientRect();
+    // Measure the text itself, not the cell, so cell padding doesn't shift the repaint.
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const rect = range.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) continue;
 
-    const strong =
-      el.classList.contains('invoice-print-strong') ||
-      el.classList.contains('invoice-print-header-amount') ||
-      Boolean(el.closest('.invoice-print-total-grand'));
+    // Read before hiding so the repaint matches the on-screen font and color.
+    const computed = getComputedStyle(el);
 
     paints.push({
       text,
       right: rect.right - rootRect.left,
       top: rect.top - rootRect.top,
-      width: rect.width,
       height: rect.height,
-      strong,
+      fontWeight: computed.fontWeight,
+      fontSizePx: Number.parseFloat(computed.fontSize) || 13,
+      fontFamily: computed.fontFamily,
+      color: computed.color,
     });
 
     // Hide DOM text — html2canvas mis-paints alignment; we redraw on the canvas.
@@ -162,8 +167,7 @@ function collectRightAlignedPaints(root: HTMLElement, selector: string): PdfText
 function paintRightAlignedTexts(
   canvas: HTMLCanvasElement,
   paints: PdfTextPaint[],
-  cssWidthPx: number,
-  fontFamily: string
+  cssWidthPx: number
 ): void {
   if (paints.length === 0) return;
   const ctx = canvas.getContext('2d');
@@ -171,18 +175,19 @@ function paintRightAlignedTexts(
 
   const scale = canvas.width / cssWidthPx;
 
+  // html2canvas leaves its own scale/translate (incl. the off-screen -10000px
+  // offset) on the context, which would push our paints off the canvas.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
   for (const paint of paints) {
     const right = paint.right * scale;
     const top = paint.top * scale;
-    const width = paint.width * scale;
     const height = Math.max(paint.height * scale, 14 * scale);
 
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(right - width - 2 * scale, top - scale, width + 4 * scale, height + 2 * scale);
-
-    const fontSize = 13 * scale;
-    ctx.fillStyle = '#111111';
-    ctx.font = `${paint.strong ? '500' : '400'} ${fontSize}px ${fontFamily}`;
+    // DOM text is already transparent, so no background fill — a fill would
+    // clip neighbouring cells (e.g. the rate breakdown Hours column).
+    ctx.fillStyle = paint.color;
+    ctx.font = `${paint.fontWeight} ${paint.fontSizePx * scale}px ${paint.fontFamily}`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(paint.text, right, top + height / 2);
@@ -307,10 +312,8 @@ async function captureInvoicePdf(
       throw new Error('Failed to render invoice PDF. Try again in a moment.');
     }
 
-    const sansFont =
-      '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Inter, system-ui, sans-serif';
-    paintRightAlignedTexts(canvas, qtyPaints, INVOICE_PDF_CAPTURE_WIDTH_PX, sansFont);
-    paintRightAlignedTexts(canvas, moneyPaints, INVOICE_PDF_CAPTURE_WIDTH_PX, sansFont);
+    paintRightAlignedTexts(canvas, qtyPaints, INVOICE_PDF_CAPTURE_WIDTH_PX);
+    paintRightAlignedTexts(canvas, moneyPaints, INVOICE_PDF_CAPTURE_WIDTH_PX);
 
     const pdf = new jsPDF('p', 'mm', 'a4') as unknown as JsPdfInstance;
     const pageSliceHeightPx = Math.max(
