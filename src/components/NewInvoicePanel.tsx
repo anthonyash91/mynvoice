@@ -238,6 +238,14 @@ export function NewInvoicePanel({
     }
   }, [resolvedClientId, isEditMode]);
 
+  const activeRecurringLineItemIds = useMemo(
+    () =>
+      invoiceClient
+        ? new Set(invoiceClient.recurringLineItems.map((item) => item.id))
+        : undefined,
+    [invoiceClient]
+  );
+
   useEffect(() => {
     if (!resolvedClientId || !issueDate) return;
 
@@ -248,7 +256,8 @@ export function NewInvoicePanel({
         resolvedClientId,
         issueDate,
         excludedCalendarEntryIds,
-        editingInvoice?.id
+        editingInvoice?.id,
+        activeRecurringLineItemIds
       )
     );
   }, [
@@ -257,6 +266,7 @@ export function NewInvoicePanel({
     calendarEntries,
     excludedCalendarEntryIds,
     editingInvoice?.id,
+    activeRecurringLineItemIds,
   ]);
 
   useEffect(() => {

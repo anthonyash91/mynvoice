@@ -71,7 +71,7 @@ export function ClientFormFields({ draft, onChange }: ClientFormFieldsProps) {
       const label = item.description.trim() || 'this recurring line item';
       const ok = await confirm({
         title: 'Remove recurring line item?',
-        description: `Remove ${label} from this client.`,
+        description: `Remove ${label} from this client. When you save, its unbilled calendar entries are deleted too; invoices already created keep it.`,
         confirmLabel: 'Remove',
       });
       if (!ok) return;

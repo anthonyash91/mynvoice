@@ -312,13 +312,22 @@ export function recurringInvoiceCalendarEntries(
   clientId: string,
   issueDate: string,
   excludedEntryIds: ReadonlySet<string> = new Set(),
-  editingInvoiceId?: string | null
+  editingInvoiceId?: string | null,
+  activeRecurringLineItemIds?: ReadonlySet<string>
 ): CalendarEntry[] {
   return calendarEntries
     .filter((entry) => entry.clientId === clientId)
     .filter((entry) => !excludedEntryIds.has(entry.id))
     .filter((entry) => isAddableCalendarEntryForInvoiceEdit(entry, editingInvoiceId))
     .filter(isRecurringCalendarEntry)
+    // Skip leftovers of recurring items removed from the client, but keep any
+    // already billed to the invoice being edited so its lines don't vanish.
+    .filter(
+      (entry) =>
+        !activeRecurringLineItemIds ||
+        activeRecurringLineItemIds.has(entry.recurringLineItemId!) ||
+        Boolean(editingInvoiceId && entry.invoiceId === editingInvoiceId)
+    )
     .filter(isInvoiceImportableCalendarEntry)
     .filter((entry) => isEntryInInvoiceImportWindow(entry.date, issueDate))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -344,7 +353,8 @@ export function syncRecurringImportedLineItems(
   clientId: string,
   issueDate: string,
   excludedEntryIds: ReadonlySet<string> = new Set(),
-  editingInvoiceId?: string | null
+  editingInvoiceId?: string | null,
+  activeRecurringLineItemIds?: ReadonlySet<string>
 ): LineItem[] {
   const prunedPrev = pruneOrphanedImportedLineItems(prev, calendarEntries, clientId);
   const recurringEntries = recurringInvoiceCalendarEntries(
@@ -352,7 +362,8 @@ export function syncRecurringImportedLineItems(
     clientId,
     issueDate,
     excludedEntryIds,
-    editingInvoiceId
+    editingInvoiceId,
+    activeRecurringLineItemIds
   );
   // Not calendarEntriesToLineItems: that drops billed entries, but entries billed
   // to the invoice being edited must stay on it.

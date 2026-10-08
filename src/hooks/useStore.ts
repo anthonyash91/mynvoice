@@ -30,6 +30,7 @@ import {
 } from '@/lib/recurringExclusions';
 import {
   deleteCalendarEntryRow,
+  deleteCalendarEntryRows,
   markCalendarEntriesBilled,
   unbillCalendarEntriesForInvoice,
   unbillCalendarEntryIds,
@@ -163,8 +164,34 @@ export function useStore(user: User | null) {
     async (client: Client) => {
       if (!user) throw new Error('Not signed in');
       const updated = await updateClientRow(user.id, client);
+
+      // Recurring items removed from the client leave generated calendar entries
+      // behind; delete the unbilled ones so they stop landing on new invoices.
+      // Billed entries stay with their invoices.
+      const snapshot = dataRef.current;
+      const activeRecurringIds = new Set(client.recurringLineItems.map((item) => item.id));
+      const orphanedEntries = snapshot.calendarEntries.filter(
+        (entry) =>
+          entry.clientId === client.id &&
+          !entry.invoiceId &&
+          entry.recurringLineItemId &&
+          !activeRecurringIds.has(entry.recurringLineItemId)
+      );
+      const orphanedIds = new Set(orphanedEntries.map((entry) => entry.id));
+      if (orphanedEntries.length > 0) {
+        await deleteCalendarEntryRows(user.id, [...orphanedIds]);
+        void deleteUnreferencedAttachmentFiles(
+          orphanedEntries.flatMap((entry) =>
+            lineItemAttachments(entry).map((attachment) => attachment.path)
+          ),
+          snapshot.invoices,
+          snapshot.calendarEntries.filter((entry) => !orphanedIds.has(entry.id))
+        );
+      }
+
       setData((prev) => ({
         ...prev,
+        calendarEntries: prev.calendarEntries.filter((entry) => !orphanedIds.has(entry.id)),
         clients: prev.clients.map((c) => (c.id === client.id ? updated : c)),
         invoices: prev.invoices.map((inv) =>
           inv.clientId === client.id
