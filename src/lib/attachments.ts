@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { LineItem, LineItemAttachment } from '@/types';
+import type { CalendarEntry, Invoice, LineItem, LineItemAttachment } from '@/types';
 
 export const ATTACHMENTS_BUCKET = 'invoice-attachments';
 
@@ -18,8 +18,19 @@ export const ATTACHMENT_ACCEPT = ACCEPTED_EXTENSIONS.map((ext) => `.${ext}`).joi
 const MISSING_BUCKET_HINT =
   'File attachments are not set up yet. Run supabase/migrate-line-item-attachments.sql in Supabase.';
 
-export function lineItemAttachments(item: Pick<LineItem, 'attachments'>): LineItemAttachment[] {
+export function lineItemAttachments(
+  item: Pick<LineItem, 'attachments'> | Pick<CalendarEntry, 'attachments'>
+): LineItemAttachment[] {
   return Array.isArray(item.attachments) ? item.attachments : [];
+}
+
+/** Combine two attachment lists, keeping the first occurrence of each attachment id. */
+export function mergeAttachments(
+  first: LineItemAttachment[],
+  second: LineItemAttachment[]
+): LineItemAttachment[] {
+  const seen = new Set(first.map((attachment) => attachment.id));
+  return [...first, ...second.filter((attachment) => !seen.has(attachment.id))];
 }
 
 export function invoiceAttachments(lineItems: LineItem[]): LineItemAttachment[] {
@@ -112,6 +123,40 @@ export async function openLineItemAttachment(attachment: LineItemAttachment): Pr
   }
 }
 
+/**
+ * Validate and upload files one at a time, reporting each success so the caller can
+ * show it immediately. Returns an error message for the last file that failed, if any.
+ */
+export async function uploadAttachmentFiles(
+  files: File[],
+  existingBytes: number,
+  onUploaded: (attachment: LineItemAttachment) => void | Promise<void>
+): Promise<string | null> {
+  let totalBytes = existingBytes;
+  let errorMessage: string | null = null;
+
+  for (const file of files) {
+    const invalid = validateAttachmentFile(file, totalBytes);
+    if (invalid) {
+      errorMessage = invalid;
+      continue;
+    }
+    try {
+      const attachment = await uploadLineItemAttachment(file);
+      totalBytes += attachment.size;
+      await onUploaded(attachment);
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : 'Failed to upload attachment.';
+    }
+  }
+
+  return errorMessage;
+}
+
+export function attachmentsTotalBytes(attachments: LineItemAttachment[]): number {
+  return attachments.reduce((sum, attachment) => sum + attachment.size, 0);
+}
+
 /** Best-effort cleanup; a leftover file only costs storage, so failures are logged, not thrown. */
 export async function deleteAttachmentFiles(paths: string[]): Promise<void> {
   const unique = [...new Set(paths.filter(Boolean))];
@@ -121,4 +166,22 @@ export async function deleteAttachmentFiles(paths: string[]): Promise<void> {
   if (error) {
     console.warn('Failed to delete invoice attachments:', error.message);
   }
+}
+
+/**
+ * Delete files that no invoice line item or calendar entry still references.
+ * Calendar entries and the invoice line items built from them share the same files.
+ */
+export function deleteUnreferencedAttachmentFiles(
+  candidatePaths: string[],
+  invoices: Invoice[],
+  calendarEntries: CalendarEntry[]
+): Promise<void> {
+  const referenced = new Set([
+    ...invoices.flatMap((invoice) => invoiceAttachmentPaths(invoice.lineItems)),
+    ...calendarEntries.flatMap((entry) =>
+      lineItemAttachments(entry).map((attachment) => attachment.path)
+    ),
+  ]);
+  return deleteAttachmentFiles(candidatePaths.filter((path) => !referenced.has(path)));
 }

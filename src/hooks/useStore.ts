@@ -52,7 +52,11 @@ import {
   upsertSettings,
 } from '@/lib/database';
 import { publicInvoiceUrl } from '@/lib/appUrl';
-import { deleteAttachmentFiles, invoiceAttachmentPaths } from '@/lib/attachments';
+import {
+  deleteUnreferencedAttachmentFiles,
+  invoiceAttachmentPaths,
+  lineItemAttachments,
+} from '@/lib/attachments';
 import { sendInvoiceWithPdf } from '@/lib/email';
 import { emptyAppData, clearLegacyLocalSeedData } from '@/lib/storage';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
@@ -269,9 +273,10 @@ export function useStore(user: User | null) {
       const nextEntryIdSet = new Set(nextEntryIds);
       const removedEntryIds = [...previousEntryIds].filter((id) => !nextEntryIdSet.has(id));
 
-      const keptAttachmentPaths = new Set(invoiceAttachmentPaths(draft.lineItems));
-      void deleteAttachmentFiles(
-        invoiceAttachmentPaths(existing.lineItems).filter((path) => !keptAttachmentPaths.has(path))
+      void deleteUnreferencedAttachmentFiles(
+        invoiceAttachmentPaths(existing.lineItems),
+        dataRef.current.invoices.map((inv) => (inv.id === invoiceId ? invoice : inv)),
+        dataRef.current.calendarEntries
       );
 
       const [unbilledEntries, billedEntries] = await Promise.all([
@@ -488,7 +493,14 @@ export function useStore(user: User | null) {
       const existing = dataRef.current.invoices.find((inv) => inv.id === invoiceId);
       const unbilledEntries = await unbillCalendarEntriesForInvoice(user.id, invoiceId);
       await deleteInvoiceRow(user.id, invoiceId);
-      if (existing) void deleteAttachmentFiles(invoiceAttachmentPaths(existing.lineItems));
+      if (existing) {
+        // Receipts that came from calendar entries stay with those (now unbilled) entries.
+        void deleteUnreferencedAttachmentFiles(
+          invoiceAttachmentPaths(existing.lineItems),
+          dataRef.current.invoices.filter((inv) => inv.id !== invoiceId),
+          dataRef.current.calendarEntries
+        );
+      }
       setData((prev) => {
         const unbilledById = new Map(unbilledEntries.map((entry) => [entry.id, entry]));
         return {
@@ -537,6 +549,13 @@ export function useStore(user: User | null) {
       const monthKey = entry ? monthKeyFromDate(entry.date) : null;
 
       await deleteCalendarEntryRow(user.id, entryId);
+      if (entry) {
+        void deleteUnreferencedAttachmentFiles(
+          lineItemAttachments(entry).map((attachment) => attachment.path),
+          snapshot.invoices,
+          snapshot.calendarEntries.filter((item) => item.id !== entryId)
+        );
+      }
 
       if (entry && client && recurringLineItemId && monthKey) {
         const updatedClient = {
@@ -611,7 +630,16 @@ export function useStore(user: User | null) {
   const updateCalendarEntry = useCallback(
     async (entry: CalendarEntry) => {
       if (!user) throw new Error('Not signed in');
+      const snapshot = dataRef.current;
+      const previous = snapshot.calendarEntries.find((item) => item.id === entry.id);
       const updated = await updateCalendarEntryRow(user.id, entry);
+      if (previous) {
+        void deleteUnreferencedAttachmentFiles(
+          lineItemAttachments(previous).map((attachment) => attachment.path),
+          snapshot.invoices,
+          snapshot.calendarEntries.map((item) => (item.id === updated.id ? updated : item))
+        );
+      }
       setData((prev) => ({
         ...prev,
         calendarEntries: [...prev.calendarEntries]

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Paperclip, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useConfirm } from '@/hooks/useConfirm';
 import { CalendarEntryStatus } from '@/components/CalendarEntryStatus';
 import { ClientCombobox } from '@/components/ClientCombobox';
@@ -8,6 +8,7 @@ import { HourlyRateCombobox } from '@/components/HourlyRateCombobox';
 import { LineItemTypeCombobox } from '@/components/LineItemTypeCombobox';
 import { LineItemTypeBadge } from '@/components/LineItemTypeBadge';
 import { lineItemKindFromCalendarEntry } from '@/lib/lineItem';
+import { AttachmentChips } from '@/components/AttachmentChips';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { FormFooter } from '@/components/FormFooter';
@@ -26,10 +27,23 @@ import {
   isCalendarEntryBilled,
   isCalendarEntryFixed,
 } from '@/lib/calendar';
+import {
+  ATTACHMENT_ACCEPT,
+  attachmentsTotalBytes,
+  deleteAttachmentFiles,
+  lineItemAttachments,
+  uploadAttachmentFiles,
+} from '@/lib/attachments';
 import { formatCurrency } from '@/lib/calculations';
 import { formatDurationQuantity } from '@/lib/duration';
 import { cn } from '@/lib/utils';
-import type { CalendarEntry, CalendarEntryType, Client, Invoice } from '@/types';
+import type {
+  CalendarEntry,
+  CalendarEntryType,
+  Client,
+  Invoice,
+  LineItemAttachment,
+} from '@/types';
 
 interface CalendarDayPanelProps {
   date: string;
@@ -88,6 +102,12 @@ export function CalendarDayPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<LineItemAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  /** Files uploaded in the open form that no saved entry references yet. */
+  const unsavedUploadPathsRef = useRef<Set<string>>(new Set());
 
   const editingEntry = editingId
     ? dayEntries.find((entry) => entry.id === editingId)
@@ -114,9 +134,10 @@ export function CalendarDayPanel({
         ? duration * selectedRate.rate
         : 0;
   const canSave =
-    entryType === 'fixed'
+    !uploading &&
+    (entryType === 'fixed'
       ? Boolean(clientId && parsedFixedAmount > 0)
-      : Boolean(clientId && selectedRate && duration > 0);
+      : Boolean(clientId && selectedRate && duration > 0));
 
   useEffect(() => {
     if (editingId || entryType !== 'hourly') return;
@@ -134,6 +155,41 @@ export function CalendarDayPanel({
     setDuration(0);
     setFixedAmount('');
     setEditingId(null);
+    setAttachments([]);
+    setAttachmentError(null);
+  };
+
+  const discardUnsavedUploads = () => {
+    void deleteAttachmentFiles([...unsavedUploadPathsRef.current]);
+    unsavedUploadPathsRef.current = new Set();
+  };
+
+  const attachFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    setUploading(true);
+    setAttachmentError(null);
+    try {
+      const error = await uploadAttachmentFiles(
+        files,
+        attachmentsTotalBytes(attachments),
+        (attachment) => {
+          unsavedUploadPathsRef.current.add(attachment.path);
+          setAttachments((prev) => [...prev, attachment]);
+        }
+      );
+      setAttachmentError(error);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeFormAttachment = (attachmentId: string) => {
+    const removed = attachments.find((attachment) => attachment.id === attachmentId);
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId));
+    // Never saved, so nothing else can reference it. Saved files are cleaned up on save.
+    if (removed && unsavedUploadPathsRef.current.delete(removed.path)) {
+      void deleteAttachmentFiles([removed.path]);
+    }
   };
 
   const startEdit = (entry: CalendarEntry) => {
@@ -142,6 +198,9 @@ export function CalendarDayPanel({
     const client = sortedClients.find((c) => c.id === entry.clientId);
     const type = calendarEntryType(entry);
 
+    discardUnsavedUploads();
+    setAttachments(lineItemAttachments(entry));
+    setAttachmentError(null);
     setEditingId(entry.id);
     setClientId(entry.clientId);
     setClientQuery(client ? clientInvoiceName(client) : '');
@@ -164,6 +223,7 @@ export function CalendarDayPanel({
   };
 
   const handleCancel = () => {
+    discardUnsavedUploads();
     resetAddForm();
     onClose();
   };
@@ -181,6 +241,7 @@ export function CalendarDayPanel({
               quantity: 1,
               rate: parsedFixedAmount,
               entryType: 'fixed' as const,
+              attachments,
             }
           : {
               clientId,
@@ -189,6 +250,7 @@ export function CalendarDayPanel({
               quantity: duration,
               rate: selectedRate!.rate,
               entryType: 'hourly' as const,
+              attachments,
             };
 
       if (editingId) {
@@ -199,7 +261,11 @@ export function CalendarDayPanel({
         setDescription('');
         setDuration(0);
         setFixedAmount('');
+        setAttachments([]);
       }
+      unsavedUploadPathsRef.current = new Set();
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : 'Failed to save entry.');
     } finally {
       setSaving(false);
     }
@@ -286,6 +352,11 @@ export function CalendarDayPanel({
                           {formatDurationQuantity(entry.quantity)} × {formatCurrency(entry.rate)}
                         </div>
                       )}
+                      <AttachmentChips
+                        attachments={lineItemAttachments(entry)}
+                        onError={setAttachmentError}
+                        className="mt-1.5"
+                      />
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       {!billed && (
@@ -393,6 +464,42 @@ export function CalendarDayPanel({
                   />
                 </Field>
               )}
+
+              <Field label="Receipts">
+                <div className="space-y-2">
+                  <AttachmentChips
+                    attachments={attachments}
+                    uploading={uploading}
+                    onRemove={removeFormAttachment}
+                    onError={setAttachmentError}
+                  />
+                  <Button
+                    variant="link"
+                    size="sm"
+                    icon={Paperclip}
+                    onClick={() => attachmentInputRef.current?.click()}
+                    disabled={uploading || saving}
+                    className="h-auto px-0 py-0"
+                  >
+                    Attach receipt
+                  </Button>
+                  {attachmentError && (
+                    <p className="text-[12px] leading-snug text-destructive">{attachmentError}</p>
+                  )}
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    accept={ATTACHMENT_ACCEPT}
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      e.target.value = '';
+                      void attachFiles(files);
+                    }}
+                  />
+                </div>
+              </Field>
 
               <div className="mt-[17px] mb-[17px] flex justify-between text-[13px]">
                 <span className="text-muted-foreground">

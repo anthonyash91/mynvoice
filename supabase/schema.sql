@@ -88,6 +88,7 @@ create table if not exists public.calendar_entries (
     check (entry_type in ('hourly', 'fixed')),
   invoice_id uuid references public.invoices (id) on delete set null,
   recurring_line_item_id uuid,
+  attachments jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
 

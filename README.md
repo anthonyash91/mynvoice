@@ -50,7 +50,7 @@ Invoices open in a slide-over panel with a live print preview, action menu (send
 
 - **New invoice** — pick a client, set issue date, optional due date, line items, notes, and tax.
 - **Line item types** — hourly (quantity × rate), fixed (flat fee), and recurring (imported from the calendar).
-- **Line item attachments** — attach receipts (PDF or image, up to 10 MB each, 20 MB per invoice) to any line item with the paperclip button. They are emailed alongside the invoice PDF on every client email (send, resend, reminders, late notices, payment received), and the invoice lists the attached file names. Requires `supabase/migrate-line-item-attachments.sql`.
+- **Line item attachments** — attach receipts (PDF or image, up to 10 MB each, 20 MB per invoice) to any line item with the paperclip button, or to a calendar entry when logging it (receipts carry over when the entry is added to an invoice). They are emailed alongside the invoice PDF on every client email (send, resend, reminders, late notices, payment received), and the invoice lists the attached file names. Requires `supabase/migrate-line-item-attachments.sql` and `supabase/migrate-calendar-entry-attachments.sql`.
 - **Tax** — optional per-invoice tax rate; can default from Settings.
 - **Drafts** — save without sending; drafts keep their status until you send.
 - **Invoice numbers** — auto-increment per client (`INV-001`, `INV-002`, …). The next number is tracked in Settings.

@@ -25,6 +25,7 @@ import type {
   BulkHistoricalImportResult,
   InvoiceReminderSettings,
   LineItem,
+  LineItemAttachment,
   EmailHistoryEntry,
   EmailTemplateKind,
   EmailTemplates,
@@ -313,10 +314,57 @@ interface DbCalendarEntry {
   entry_type?: CalendarEntryType;
   invoice_id?: string | null;
   recurring_line_item_id?: string | null;
+  attachments?: LineItemAttachment[] | null;
 }
 
-const CALENDAR_ENTRY_SELECT =
+const CALENDAR_ENTRY_SELECT_BASE =
   'id, client_id, entry_date, description, quantity, rate, entry_type, invoice_id, recurring_line_item_id';
+
+const CALENDAR_ENTRY_SELECT = `${CALENDAR_ENTRY_SELECT_BASE}, attachments`;
+
+const MISSING_CALENDAR_ATTACHMENTS_HINT =
+  'Run supabase/migrate-calendar-entry-attachments.sql in Supabase to save receipts on calendar entries.';
+
+/** null until a query shows whether calendar_entries.attachments exists. */
+let calendarAttachmentsColumn: boolean | null = null;
+
+function isMissingCalendarAttachmentsColumnError(error: { message?: string } | null): boolean {
+  return error?.message?.toLowerCase().includes('attachments') ?? false;
+}
+
+/**
+ * Run a calendar_entries query with the attachments column, falling back to the
+ * base columns when migrate-calendar-entry-attachments.sql has not been applied.
+ */
+async function withCalendarAttachments<T>(
+  run: (
+    select: string,
+    includeAttachments: boolean
+  ) => PromiseLike<{ data: T | null; error: { message: string } | null }>
+): Promise<T | null> {
+  if (calendarAttachmentsColumn !== false) {
+    const result = await run(CALENDAR_ENTRY_SELECT, true);
+    if (!result.error) {
+      calendarAttachmentsColumn = true;
+      return result.data;
+    }
+    if (!isMissingCalendarAttachmentsColumnError(result.error)) throw result.error;
+    calendarAttachmentsColumn = false;
+  }
+
+  const result = await run(CALENDAR_ENTRY_SELECT_BASE, false);
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+function calendarAttachmentsField(
+  entry: Pick<CalendarEntry, 'attachments'>,
+  includeAttachments: boolean
+): { attachments?: LineItemAttachment[] } {
+  if (includeAttachments) return { attachments: entry.attachments ?? [] };
+  if (entry.attachments?.length) throw new Error(MISSING_CALENDAR_ATTACHMENTS_HINT);
+  return {};
+}
 
 interface DbSettings {
   business_name: string;
@@ -526,6 +574,7 @@ function toCalendarEntry(row: DbCalendarEntry): CalendarEntry {
     entryType: row.entry_type ?? 'hourly',
     invoiceId: row.invoice_id ?? null,
     recurringLineItemId: row.recurring_line_item_id ?? null,
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
   };
 }
 
@@ -778,26 +827,25 @@ export async function fetchAppData(userId: string): Promise<AppData> {
 
   const invoicesRes = await selectInvoicesForUser(userId);
 
-  const [clients, calendarRes, settingsRow, emailHistory] = await Promise.all([
+  const [clients, calendarRows, settingsRow, emailHistory] = await Promise.all([
     fetchClients(userId),
-    supabase
-      .from('calendar_entries')
-      .select(CALENDAR_ENTRY_SELECT)
-      .eq('user_id', userId)
-      .order('entry_date', { ascending: true }),
+    withCalendarAttachments((select) =>
+      supabase
+        .from('calendar_entries')
+        .select(select)
+        .eq('user_id', userId)
+        .order('entry_date', { ascending: true })
+    ),
     ensureUserSettings(userId),
     fetchEmailHistory(userId),
   ]);
 
   if (invoicesRes.error) throw invoicesRes.error;
-  if (calendarRes.error) throw calendarRes.error;
 
   return {
     clients,
     invoices: ((invoicesRes.data ?? []) as unknown as DbInvoice[]).map(toInvoice),
-    calendarEntries: (calendarRes.data ?? []).map((row) =>
-      toCalendarEntry(row as DbCalendarEntry)
-    ),
+    calendarEntries: ((calendarRows ?? []) as unknown as DbCalendarEntry[]).map(toCalendarEntry),
     recurringCalendarExclusions: [],
     emailHistory,
     settings: toSettings(userId, settingsRow),
@@ -1528,45 +1576,49 @@ export async function insertCalendarEntry(
   userId: string,
   entry: Omit<CalendarEntry, 'id'>
 ): Promise<CalendarEntry> {
-  const { data, error } = await supabase
-    .from('calendar_entries')
-    .insert({
-      user_id: userId,
-      client_id: entry.clientId,
-      entry_date: entry.date,
-      description: entry.description,
-      quantity: entry.quantity,
-      rate: entry.rate,
-      entry_type: entry.entryType,
-      recurring_line_item_id: entry.recurringLineItemId ?? null,
-    })
-    .select(CALENDAR_ENTRY_SELECT)
-    .single();
-  if (error) throw error;
-  return toCalendarEntry(data as DbCalendarEntry);
+  const data = await withCalendarAttachments((select, includeAttachments) =>
+    supabase
+      .from('calendar_entries')
+      .insert({
+        user_id: userId,
+        client_id: entry.clientId,
+        entry_date: entry.date,
+        description: entry.description,
+        quantity: entry.quantity,
+        rate: entry.rate,
+        entry_type: entry.entryType,
+        recurring_line_item_id: entry.recurringLineItemId ?? null,
+        ...calendarAttachmentsField(entry, includeAttachments),
+      })
+      .select(select)
+      .single()
+  );
+  return toCalendarEntry(data as unknown as DbCalendarEntry);
 }
 
 export async function updateCalendarEntryRow(
   userId: string,
   entry: CalendarEntry
 ): Promise<CalendarEntry> {
-  const { data, error } = await supabase
-    .from('calendar_entries')
-    .update({
-      client_id: entry.clientId,
-      entry_date: entry.date,
-      description: entry.description,
-      quantity: entry.quantity,
-      rate: entry.rate,
-      entry_type: entry.entryType,
-      recurring_line_item_id: entry.recurringLineItemId ?? null,
-    })
-    .eq('user_id', userId)
-    .eq('id', entry.id)
-    .select(CALENDAR_ENTRY_SELECT)
-    .single();
-  if (error) throw error;
-  return toCalendarEntry(data as DbCalendarEntry);
+  const data = await withCalendarAttachments((select, includeAttachments) =>
+    supabase
+      .from('calendar_entries')
+      .update({
+        client_id: entry.clientId,
+        entry_date: entry.date,
+        description: entry.description,
+        quantity: entry.quantity,
+        rate: entry.rate,
+        entry_type: entry.entryType,
+        recurring_line_item_id: entry.recurringLineItemId ?? null,
+        ...calendarAttachmentsField(entry, includeAttachments),
+      })
+      .eq('user_id', userId)
+      .eq('id', entry.id)
+      .select(select)
+      .single()
+  );
+  return toCalendarEntry(data as unknown as DbCalendarEntry);
 }
 
 export async function markCalendarEntriesBilled(
@@ -1576,31 +1628,31 @@ export async function markCalendarEntriesBilled(
 ): Promise<CalendarEntry[]> {
   if (entryIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('calendar_entries')
-    .update({ invoice_id: invoiceId })
-    .eq('user_id', userId)
-    .in('id', entryIds)
-    .is('invoice_id', null)
-    .select(CALENDAR_ENTRY_SELECT);
-
-  if (error) throw error;
-  return (data ?? []).map((row) => toCalendarEntry(row as DbCalendarEntry));
+  const data = await withCalendarAttachments((select) =>
+    supabase
+      .from('calendar_entries')
+      .update({ invoice_id: invoiceId })
+      .eq('user_id', userId)
+      .in('id', entryIds)
+      .is('invoice_id', null)
+      .select(select)
+  );
+  return ((data ?? []) as unknown as DbCalendarEntry[]).map(toCalendarEntry);
 }
 
 export async function unbillCalendarEntriesForInvoice(
   userId: string,
   invoiceId: string
 ): Promise<CalendarEntry[]> {
-  const { data, error } = await supabase
-    .from('calendar_entries')
-    .update({ invoice_id: null })
-    .eq('user_id', userId)
-    .eq('invoice_id', invoiceId)
-    .select(CALENDAR_ENTRY_SELECT);
-
-  if (error) throw error;
-  return (data ?? []).map((row) => toCalendarEntry(row as DbCalendarEntry));
+  const data = await withCalendarAttachments((select) =>
+    supabase
+      .from('calendar_entries')
+      .update({ invoice_id: null })
+      .eq('user_id', userId)
+      .eq('invoice_id', invoiceId)
+      .select(select)
+  );
+  return ((data ?? []) as unknown as DbCalendarEntry[]).map(toCalendarEntry);
 }
 
 export async function unbillCalendarEntryIds(
@@ -1610,16 +1662,16 @@ export async function unbillCalendarEntryIds(
 ): Promise<CalendarEntry[]> {
   if (entryIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('calendar_entries')
-    .update({ invoice_id: null })
-    .eq('user_id', userId)
-    .eq('invoice_id', invoiceId)
-    .in('id', entryIds)
-    .select(CALENDAR_ENTRY_SELECT);
-
-  if (error) throw error;
-  return (data ?? []).map((row) => toCalendarEntry(row as DbCalendarEntry));
+  const data = await withCalendarAttachments((select) =>
+    supabase
+      .from('calendar_entries')
+      .update({ invoice_id: null })
+      .eq('user_id', userId)
+      .eq('invoice_id', invoiceId)
+      .in('id', entryIds)
+      .select(select)
+  );
+  return ((data ?? []) as unknown as DbCalendarEntry[]).map(toCalendarEntry);
 }
 
 export async function deleteCalendarEntryRow(userId: string, entryId: string): Promise<void> {

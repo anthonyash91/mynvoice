@@ -51,6 +51,8 @@ export interface CalendarEntry {
   entryType: CalendarEntryType;
   invoiceId?: string | null;
   recurringLineItemId?: string | null;
+  /** Receipts logged with the work; copied onto the invoice line item when billed. */
+  attachments?: LineItemAttachment[];
 }
 
 export interface RecurringLineItem {

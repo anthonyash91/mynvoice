@@ -1,4 +1,5 @@
 import type { CalendarEntry, CalendarEntryType, LineItem } from '@/types';
+import { lineItemAttachments, mergeAttachments } from '@/lib/attachments';
 import { formatCurrency } from '@/lib/calculations';
 import { formatDurationQuantity } from '@/lib/duration';
 
@@ -145,18 +146,22 @@ export function calendarEntryToLineItem(entry: CalendarEntry, lineItemId?: strin
     sourceCalendarEntryId: entry.id,
     sourceRecurringLineItemId: entry.recurringLineItemId ?? undefined,
     sourceDate: entry.date,
+    ...(entry.attachments?.length ? { attachments: entry.attachments } : {}),
   };
 }
 
 /**
- * Carry invoice-only fields (id, attachments) onto a line item rebuilt from its
- * calendar entry, so re-syncing with the calendar never drops attached receipts.
+ * Carry the line item id onto a line item rebuilt from its calendar entry, and
+ * combine the entry's receipts with any attached on the invoice, so re-syncing
+ * with the calendar never drops attachments.
  */
 export function keepInvoiceLineItemFields(next: LineItem, existing: LineItem): LineItem {
   const merged = { ...next, id: existing.id };
-  return existing.attachments?.length
-    ? { ...merged, attachments: existing.attachments }
-    : merged;
+  const attachments = mergeAttachments(
+    lineItemAttachments(next),
+    lineItemAttachments(existing)
+  );
+  return attachments.length > 0 ? { ...merged, attachments } : merged;
 }
 
 export function calendarEntriesToLineItems(entries: CalendarEntry[]): LineItem[] {

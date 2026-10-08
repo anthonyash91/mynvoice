@@ -18,6 +18,7 @@ import type {
   Invoice,
   InvoiceDraft,
   LineItem,
+  LineItemAttachment,
   RecurringCalendarExclusion,
   Settings,
 } from '@/types';
@@ -29,13 +30,13 @@ import { LineItemTypeBadge } from '@/components/LineItemTypeBadge';
 import { lineItemInvoiceDate, lineItemKindFromLineItem } from '@/lib/lineItem';
 import {
   ATTACHMENT_ACCEPT,
-  formatFileSize,
+  attachmentsTotalBytes,
   invoiceAttachments,
   lineItemAttachments,
-  openLineItemAttachment,
-  uploadLineItemAttachment,
-  validateAttachmentFile,
+  mergeAttachments,
+  uploadAttachmentFiles,
 } from '@/lib/attachments';
+import { AttachmentChips } from '@/components/AttachmentChips';
 import {
   addableCalendarEntriesForInvoice,
   calendarEntriesToLineItems,
@@ -43,7 +44,6 @@ import {
   formatCalendarEntryAmount,
   isEmptyFixedCalendarEntry,
   isRecurringCalendarEntry,
-  keepInvoiceLineItemFields,
   syncRecurringImportedLineItems,
 } from '@/lib/calendar';
 import { nextInvoiceNumberForClient, resolveClientIdForInvoice } from '@/lib/invoice';
@@ -454,46 +454,60 @@ export function NewInvoicePanel({
     attachmentInputRef.current?.click();
   };
 
+  /** Keep a calendar-backed line item's receipts in sync with its calendar entry. */
+  const updateSourceEntryAttachments = async (
+    item: LineItem,
+    update: (attachments: LineItemAttachment[]) => LineItemAttachment[]
+  ) => {
+    const entry = item.sourceCalendarEntryId
+      ? calendarEntries.find((calendarEntry) => calendarEntry.id === item.sourceCalendarEntryId)
+      : undefined;
+    if (!entry) return;
+    await onUpdateCalendarEntry({ ...entry, attachments: update(lineItemAttachments(entry)) });
+  };
+
   const attachFiles = async (files: File[]) => {
     const itemId = attachTargetItemIdRef.current;
     attachTargetItemIdRef.current = null;
-    if (!itemId || files.length === 0) return;
+    const item = lineItems.find((lineItem) => lineItem.id === itemId);
+    if (!item || files.length === 0) return;
 
-    setUploadingItemId(itemId);
+    setUploadingItemId(item.id);
     setAttachmentError(null);
-    let invoiceBytes = invoiceAttachments(lineItems).reduce(
-      (sum, attachment) => sum + attachment.size,
-      0
-    );
+    const uploaded: LineItemAttachment[] = [];
 
     try {
-      for (const file of files) {
-        const invalid = validateAttachmentFile(file, invoiceBytes);
-        if (invalid) {
-          setAttachmentError(invalid);
-          continue;
+      const error = await uploadAttachmentFiles(
+        files,
+        attachmentsTotalBytes(invoiceAttachments(lineItems)),
+        (attachment) => {
+          uploaded.push(attachment);
+          setLineItems((prev) =>
+            prev.map((i) =>
+              i.id === item.id
+                ? { ...i, attachments: [...lineItemAttachments(i), attachment] }
+                : i
+            )
+          );
         }
-        const attachment = await uploadLineItemAttachment(file);
-        invoiceBytes += attachment.size;
-        setLineItems((prev) =>
-          prev.map((i) =>
-            i.id === itemId
-              ? { ...i, attachments: [...lineItemAttachments(i), attachment] }
-              : i
-          )
+      );
+      if (uploaded.length > 0) {
+        await updateSourceEntryAttachments(item, (current) =>
+          mergeAttachments(current, uploaded)
         );
       }
+      setAttachmentError(error);
     } catch (err) {
-      setAttachmentError(err instanceof Error ? err.message : 'Failed to upload attachment.');
+      setAttachmentError(err instanceof Error ? err.message : 'Failed to save attachment.');
     } finally {
       setUploadingItemId(null);
     }
   };
 
-  const removeAttachment = (itemId: string, attachmentId: string) =>
+  const removeAttachment = async (item: LineItem, attachmentId: string) => {
     setLineItems((prev) =>
       prev.map((i) =>
-        i.id === itemId
+        i.id === item.id
           ? {
               ...i,
               attachments: lineItemAttachments(i).filter((a) => a.id !== attachmentId),
@@ -501,6 +515,14 @@ export function NewInvoicePanel({
           : i
       )
     );
+    try {
+      await updateSourceEntryAttachments(item, (current) =>
+        current.filter((attachment) => attachment.id !== attachmentId)
+      );
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : 'Failed to remove attachment.');
+    }
+  };
 
   const [saving, setSaving] = useState(false);
 
@@ -737,10 +759,9 @@ export function NewInvoicePanel({
                         setLineItems((prev) =>
                           prev.map((lineItem) =>
                             lineItem.id === item.id
-                              ? keepInvoiceLineItemFields(
-                                  calendarEntryToLineItem(entry),
-                                  lineItem
-                                )
+                              ? // The form saves the full receipt list onto the entry,
+                                // so take it as-is (merging would undo removals).
+                                calendarEntryToLineItem(entry, lineItem.id)
                               : lineItem
                           )
                         );
@@ -808,45 +829,13 @@ export function NewInvoicePanel({
                           />
                         </div>
                       </div>
-                      {(attachments.length > 0 || isUploading) && (
-                        <div className="-mt-1 flex flex-wrap items-center gap-1.5 px-3 pb-2.5">
-                          {attachments.map((attachment) => (
-                            <span
-                              key={attachment.id}
-                              className="inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-border bg-secondary pl-1.5 text-[12px]"
-                            >
-                              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  openLineItemAttachment(attachment).catch((err) =>
-                                    setAttachmentError(
-                                      err instanceof Error ? err.message : 'Failed to open attachment.'
-                                    )
-                                  )
-                                }
-                                title={attachment.fileName}
-                                className="min-w-0 truncate hover:underline"
-                              >
-                                {attachment.fileName}
-                              </button>
-                              <span className="shrink-0 text-muted-foreground tabular-nums">
-                                {formatFileSize(attachment.size)}
-                              </span>
-                              <IconButton
-                                icon={X}
-                                variant="destructive"
-                                aria-label={`Remove ${attachment.fileName}`}
-                                onClick={() => removeAttachment(item.id, attachment.id)}
-                                className="py-0.5"
-                              />
-                            </span>
-                          ))}
-                          {isUploading && (
-                            <span className="text-[12px] text-muted-foreground">Uploading…</span>
-                          )}
-                        </div>
-                      )}
+                      <AttachmentChips
+                        attachments={attachments}
+                        uploading={isUploading}
+                        onRemove={(attachmentId) => void removeAttachment(item, attachmentId)}
+                        onError={setAttachmentError}
+                        className="-mt-1 px-3 pb-2.5"
+                      />
                     </>
                   )}
                 </div>
