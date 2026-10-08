@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Paperclip, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useConfirm } from '@/hooks/useConfirm';
 import { Button } from '@/components/Button';
 import { ClientCombobox } from '@/components/ClientCombobox';
@@ -28,12 +28,22 @@ import { ImportedLineItemEditForm } from '@/components/ImportedLineItemEditForm'
 import { LineItemTypeBadge } from '@/components/LineItemTypeBadge';
 import { lineItemInvoiceDate, lineItemKindFromLineItem } from '@/lib/lineItem';
 import {
+  ATTACHMENT_ACCEPT,
+  formatFileSize,
+  invoiceAttachments,
+  lineItemAttachments,
+  openLineItemAttachment,
+  uploadLineItemAttachment,
+  validateAttachmentFile,
+} from '@/lib/attachments';
+import {
   addableCalendarEntriesForInvoice,
   calendarEntriesToLineItems,
   calendarEntryToLineItem,
   formatCalendarEntryAmount,
   isEmptyFixedCalendarEntry,
   isRecurringCalendarEntry,
+  keepInvoiceLineItemFields,
   syncRecurringImportedLineItems,
 } from '@/lib/calendar';
 import { nextInvoiceNumberForClient, resolveClientIdForInvoice } from '@/lib/invoice';
@@ -92,7 +102,7 @@ function resolveEditCalendarEntry(
   };
 }
 
-const LINE_ITEMS_GRID = 'grid-cols-[1fr_4.75rem_5.5rem_52px]';
+const LINE_ITEMS_GRID = 'grid-cols-[1fr_4.75rem_5.5rem_64px]';
 
 function LineItemTypeCell({ kind }: { kind: ReturnType<typeof lineItemKindFromLineItem> }) {
   return (
@@ -191,6 +201,10 @@ export function NewInvoicePanel({
   const [taxRate, setTaxRate] = useState(
     editingInvoice ? editingInvoice.taxRate : settings.defaultTaxRate
   );
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const attachTargetItemIdRef = useRef<string | null>(null);
+  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
   const resolvedClientId = useMemo(
     () => resolveClientIdForInvoice(clients, clientId, clientQuery),
@@ -434,6 +448,60 @@ export function NewInvoicePanel({
     setLineItems((arr) => arr.filter((i) => i.id !== item.id));
   };
 
+  const pickAttachment = (itemId: string) => {
+    attachTargetItemIdRef.current = itemId;
+    setAttachmentError(null);
+    attachmentInputRef.current?.click();
+  };
+
+  const attachFiles = async (files: File[]) => {
+    const itemId = attachTargetItemIdRef.current;
+    attachTargetItemIdRef.current = null;
+    if (!itemId || files.length === 0) return;
+
+    setUploadingItemId(itemId);
+    setAttachmentError(null);
+    let invoiceBytes = invoiceAttachments(lineItems).reduce(
+      (sum, attachment) => sum + attachment.size,
+      0
+    );
+
+    try {
+      for (const file of files) {
+        const invalid = validateAttachmentFile(file, invoiceBytes);
+        if (invalid) {
+          setAttachmentError(invalid);
+          continue;
+        }
+        const attachment = await uploadLineItemAttachment(file);
+        invoiceBytes += attachment.size;
+        setLineItems((prev) =>
+          prev.map((i) =>
+            i.id === itemId
+              ? { ...i, attachments: [...lineItemAttachments(i), attachment] }
+              : i
+          )
+        );
+      }
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : 'Failed to upload attachment.');
+    } finally {
+      setUploadingItemId(null);
+    }
+  };
+
+  const removeAttachment = (itemId: string, attachmentId: string) =>
+    setLineItems((prev) =>
+      prev.map((i) =>
+        i.id === itemId
+          ? {
+              ...i,
+              attachments: lineItemAttachments(i).filter((a) => a.id !== attachmentId),
+            }
+          : i
+      )
+    );
+
   const [saving, setSaving] = useState(false);
 
   const handleSave = async (status: 'draft' | 'unpaid') => {
@@ -646,6 +714,8 @@ export function NewInvoicePanel({
                   selectedClient
                 : null;
               const isEditing = editingLineItemId === item.id;
+              const attachments = lineItemAttachments(item);
+              const isUploading = uploadingItemId === item.id;
               const showEditForm =
                 isEditing &&
                 editCalendarEntry &&
@@ -667,7 +737,10 @@ export function NewInvoicePanel({
                         setLineItems((prev) =>
                           prev.map((lineItem) =>
                             lineItem.id === item.id
-                              ? calendarEntryToLineItem(entry, lineItem.id)
+                              ? keepInvoiceLineItemFields(
+                                  calendarEntryToLineItem(entry),
+                                  lineItem
+                                )
                               : lineItem
                           )
                         );
@@ -687,51 +760,115 @@ export function NewInvoicePanel({
                       }}
                     />
                   ) : (
-                    <div
-                      className={cn(
-                        'grid gap-3 pl-3 pr-0 pt-[8px] pb-[9.5px] items-center',
-                        LINE_ITEMS_GRID
-                      )}
-                    >
-                      {isImported ? (
-                        <ImportedInvoiceLineItem item={item} />
-                      ) : (
-                        <>
-                          <input
-                            value={item.description}
-                            onChange={(e) => updateItem(item.id, { description: e.target.value })}
-                            placeholder="e.g. Brand identity — logo & marks"
-                            className="h-7 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground/60"
+                    <>
+                      <div
+                        className={cn(
+                          'grid gap-3 pl-3 pr-0 pt-[8px] pb-[9.5px] items-center',
+                          LINE_ITEMS_GRID
+                        )}
+                      >
+                        {isImported ? (
+                          <ImportedInvoiceLineItem item={item} />
+                        ) : (
+                          <>
+                            <input
+                              value={item.description}
+                              onChange={(e) => updateItem(item.id, { description: e.target.value })}
+                              placeholder="e.g. Brand identity — logo & marks"
+                              className="h-7 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground/60"
+                            />
+                            <LineItemTypeCell kind={lineItemKindFromLineItem(item)} />
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={amount || ''}
+                              onChange={(e) =>
+                                updateItem(item.id, { rate: Number(e.target.value) || 0 })
+                              }
+                              className="h-7 w-full bg-transparent pl-1 text-left outline-none tabular-nums"
+                            />
+                          </>
+                        )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Tooltip content="Attach receipt">
+                            <IconButton
+                              icon={Paperclip}
+                              aria-label="Attach file"
+                              onClick={() => pickAttachment(item.id)}
+                              disabled={uploadingItemId !== null}
+                            />
+                          </Tooltip>
+                          <IconButton
+                            icon={Trash2}
+                            variant="destructive"
+                            aria-label="Remove line item"
+                            onClick={() => removeLineItem(item)}
+                            className="pr-3"
                           />
-                          <LineItemTypeCell kind={lineItemKindFromLineItem(item)} />
-                          <input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={amount || ''}
-                            onChange={(e) =>
-                              updateItem(item.id, { rate: Number(e.target.value) || 0 })
-                            }
-                            className="h-7 w-full bg-transparent pl-1 text-left outline-none tabular-nums"
-                          />
-                        </>
-                      )}
-                      <div className="flex items-center justify-end gap-1.5">
-                        <IconButton
-                          icon={Trash2}
-                          variant="destructive"
-                          aria-label="Remove line item"
-                          onClick={() => removeLineItem(item)}
-                          className="pr-3"
-                        />
+                        </div>
                       </div>
-                    </div>
+                      {(attachments.length > 0 || isUploading) && (
+                        <div className="-mt-1 flex flex-wrap items-center gap-1.5 px-3 pb-2.5">
+                          {attachments.map((attachment) => (
+                            <span
+                              key={attachment.id}
+                              className="inline-flex min-w-0 max-w-full items-center gap-1 rounded border border-border bg-secondary pl-1.5 text-[12px]"
+                            >
+                              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openLineItemAttachment(attachment).catch((err) =>
+                                    setAttachmentError(
+                                      err instanceof Error ? err.message : 'Failed to open attachment.'
+                                    )
+                                  )
+                                }
+                                title={attachment.fileName}
+                                className="min-w-0 truncate hover:underline"
+                              >
+                                {attachment.fileName}
+                              </button>
+                              <span className="shrink-0 text-muted-foreground tabular-nums">
+                                {formatFileSize(attachment.size)}
+                              </span>
+                              <IconButton
+                                icon={X}
+                                variant="destructive"
+                                aria-label={`Remove ${attachment.fileName}`}
+                                onClick={() => removeAttachment(item.id, attachment.id)}
+                                className="py-0.5"
+                              />
+                            </span>
+                          ))}
+                          {isUploading && (
+                            <span className="text-[12px] text-muted-foreground">Uploading…</span>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               );
               })}
             </div>
           )}
+          {attachmentError && (
+            <p className="mt-2 text-[12px] leading-snug text-destructive">{attachmentError}</p>
+          )}
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            accept={ATTACHMENT_ACCEPT}
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = '';
+              void attachFiles(files);
+            }}
+          />
           <Button
             variant="link"
             size="sm"

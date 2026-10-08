@@ -148,6 +148,17 @@ export function calendarEntryToLineItem(entry: CalendarEntry, lineItemId?: strin
   };
 }
 
+/**
+ * Carry invoice-only fields (id, attachments) onto a line item rebuilt from its
+ * calendar entry, so re-syncing with the calendar never drops attached receipts.
+ */
+export function keepInvoiceLineItemFields(next: LineItem, existing: LineItem): LineItem {
+  const merged = { ...next, id: existing.id };
+  return existing.attachments?.length
+    ? { ...merged, attachments: existing.attachments }
+    : merged;
+}
+
 export function calendarEntriesToLineItems(entries: CalendarEntry[]): LineItem[] {
   return unbilledCalendarEntries(entries)
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -269,7 +280,7 @@ export function syncImportedLineItems(
     const existing = prunedPrev.find(
       (lineItem) => lineItem.sourceCalendarEntryId === item.sourceCalendarEntryId
     );
-    return existing ? { ...item, id: existing.id } : item;
+    return existing ? keepInvoiceLineItemFields(item, existing) : item;
   });
 
   return manual.length > 0 ? [...merged, ...manual] : merged;
@@ -318,7 +329,7 @@ export function refreshImportedLineItemsFromCalendar(
     const entry = calendarEntries.find(
       (calendarEntry) => calendarEntry.id === item.sourceCalendarEntryId
     );
-    return entry ? calendarEntryToLineItem(entry, item.id) : item;
+    return entry ? keepInvoiceLineItemFields(calendarEntryToLineItem(entry), item) : item;
   });
 }
 
@@ -338,7 +349,9 @@ export function syncRecurringImportedLineItems(
     excludedEntryIds,
     editingInvoiceId
   );
-  const importedRecurring = calendarEntriesToLineItems(recurringEntries);
+  // Not calendarEntriesToLineItems: that drops billed entries, but entries billed
+  // to the invoice being edited must stay on it.
+  const importedRecurring = recurringEntries.map((entry) => calendarEntryToLineItem(entry));
 
   const kept = prunedPrev.filter((item) => {
     if (!item.sourceCalendarEntryId) return true;
@@ -358,7 +371,7 @@ export function syncRecurringImportedLineItems(
     const existing = prunedPrev.find(
       (lineItem) => lineItem.sourceCalendarEntryId === item.sourceCalendarEntryId
     );
-    return existing ? { ...item, id: existing.id } : item;
+    return existing ? keepInvoiceLineItemFields(item, existing) : item;
   });
 
   return [...mergedRecurring, ...refreshedKept].sort((a, b) =>

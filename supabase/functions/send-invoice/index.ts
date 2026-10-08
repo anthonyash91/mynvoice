@@ -6,6 +6,10 @@ import {
   ownerCcRecipients,
 } from '../_shared/edgeEmail.ts';
 import { generateInvoicePdfBase64 } from '../_shared/invoicePdf.ts';
+import {
+  loadLineItemAttachments,
+  type EmailAttachment,
+} from '../_shared/lineItemAttachments.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -242,6 +246,34 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: `Invalid recipient: ${invalidRecipient}` }, 400);
     }
 
+    let lineItemAttachments: EmailAttachment[] = [];
+    if (invoiceId) {
+      const { data: invoiceRow, error: invoiceError } = await supabase
+        .from('invoices')
+        .select('line_items')
+        .eq('id', invoiceId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (invoiceError) {
+        return jsonResponse({ error: invoiceError.message }, 500);
+      }
+
+      try {
+        lineItemAttachments = await loadLineItemAttachments(
+          supabase,
+          user.id,
+          invoiceRow?.line_items
+        );
+      } catch (attachmentError) {
+        const message =
+          attachmentError instanceof Error
+            ? attachmentError.message
+            : 'Failed to load invoice attachments.';
+        return jsonResponse({ error: message }, 400);
+      }
+    }
+
     const { data: settingsRow } = await supabase
       .from('user_settings')
       .select('email')
@@ -263,14 +295,13 @@ Deno.serve(async (req) => {
       payload.cc = cc;
     }
 
-    if (pdfBase64) {
-      payload.attachments = [
-        {
-          filename,
-          content: pdfBase64,
-        },
-      ];
-    }
+    payload.attachments = [
+      {
+        filename,
+        content: pdfBase64,
+      },
+      ...lineItemAttachments,
+    ];
 
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',

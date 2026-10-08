@@ -18,6 +18,7 @@ import {
   resolveLateReminderIntervalDays,
   resolveUnpaidReminderIntervalDays,
 } from '../_shared/reminders.ts';
+import { loadLineItemAttachments } from '../_shared/lineItemAttachments.ts';
 import { authorizeServiceRoleRequest } from '../_shared/serviceRoleAuth.ts';
 
 type EmailTemplate = {
@@ -243,6 +244,11 @@ async function sendAutomatedInvoiceEmail(input: {
   });
 
   try {
+    const attachments = await loadLineItemAttachments(
+      input.supabase,
+      userId,
+      input.invoice.line_items
+    );
     await sendResendEmail({
       apiKey: input.resendApiKey,
       from,
@@ -251,6 +257,7 @@ async function sendAutomatedInvoiceEmail(input: {
       html: rendered.html,
       pdfBase64,
       filename: `${String(input.invoice.number)}.pdf`,
+      attachments,
     });
   } catch (err) {
     return err instanceof Error ? err.message : 'Failed to send email.';

@@ -50,6 +50,7 @@ Invoices open in a slide-over panel with a live print preview, action menu (send
 
 - **New invoice** — pick a client, set issue date, optional due date, line items, notes, and tax.
 - **Line item types** — hourly (quantity × rate), fixed (flat fee), and recurring (imported from the calendar).
+- **Line item attachments** — attach receipts (PDF or image, up to 10 MB each, 20 MB per invoice) to any line item with the paperclip button. They are emailed alongside the invoice PDF on every client email (send, resend, reminders, late notices, payment received), and the invoice lists the attached file names. Requires `supabase/migrate-line-item-attachments.sql`.
 - **Tax** — optional per-invoice tax rate; can default from Settings.
 - **Drafts** — save without sending; drafts keep their status until you send.
 - **Invoice numbers** — auto-increment per client (`INV-001`, `INV-002`, …). The next number is tracked in Settings.
@@ -289,6 +290,7 @@ The business email must match a **verified sender** in Resend.
 ### Data storage
 
 - **Supabase Postgres** — clients, invoices, calendar entries, settings, email history
+- **Supabase Storage** — line item attachments in the private `invoice-attachments` bucket (`<user_id>/<attachment_id>/<file>`)
 - **localStorage** — legacy import path, email template cache, recurring exclusion fallback
 
 ---
@@ -343,7 +345,7 @@ VITE_APP_URL=http://localhost:5173
 In the Supabase SQL Editor:
 
 1. Run `supabase/schema.sql` for a fresh project
-2. For existing databases, apply migrations in `supabase/migrate-*.sql` as needed (payment flow, email templates, reminders, PayPal, history, etc.)
+2. For existing databases, apply migrations in `supabase/migrate-*.sql` as needed (payment flow, email templates, reminders, PayPal, history, line item attachments, etc.)
 
 Enable **Email** auth in Supabase (Authentication → Providers).
 

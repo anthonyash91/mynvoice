@@ -52,6 +52,7 @@ import {
   upsertSettings,
 } from '@/lib/database';
 import { publicInvoiceUrl } from '@/lib/appUrl';
+import { deleteAttachmentFiles, invoiceAttachmentPaths } from '@/lib/attachments';
 import { sendInvoiceWithPdf } from '@/lib/email';
 import { emptyAppData, clearLegacyLocalSeedData } from '@/lib/storage';
 import { saveEmailTemplatesToStorage } from '@/lib/emailTemplateStorage';
@@ -268,6 +269,11 @@ export function useStore(user: User | null) {
       const nextEntryIdSet = new Set(nextEntryIds);
       const removedEntryIds = [...previousEntryIds].filter((id) => !nextEntryIdSet.has(id));
 
+      const keptAttachmentPaths = new Set(invoiceAttachmentPaths(draft.lineItems));
+      void deleteAttachmentFiles(
+        invoiceAttachmentPaths(existing.lineItems).filter((path) => !keptAttachmentPaths.has(path))
+      );
+
       const [unbilledEntries, billedEntries] = await Promise.all([
         removedEntryIds.length > 0
           ? unbillCalendarEntryIds(user.id, invoiceId, removedEntryIds)
@@ -479,8 +485,10 @@ export function useStore(user: User | null) {
   const deleteInvoice = useCallback(
     async (invoiceId: string) => {
       if (!user) throw new Error('Not signed in');
+      const existing = dataRef.current.invoices.find((inv) => inv.id === invoiceId);
       const unbilledEntries = await unbillCalendarEntriesForInvoice(user.id, invoiceId);
       await deleteInvoiceRow(user.id, invoiceId);
+      if (existing) void deleteAttachmentFiles(invoiceAttachmentPaths(existing.lineItems));
       setData((prev) => {
         const unbilledById = new Map(unbilledEntries.map((entry) => [entry.id, entry]));
         return {

@@ -162,6 +162,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.invoice-print-line-attachment {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #6e6e73;
+}
+
 .invoice-print-qty-rate,
 .invoice-print-amount {
   box-sizing: border-box;

@@ -19,6 +19,16 @@ export type Panel =
 
 export type CalendarEntryType = 'hourly' | 'fixed';
 
+/** A file (e.g. a receipt) stored in the `invoice-attachments` bucket and emailed with the invoice. */
+export interface LineItemAttachment {
+  id: string;
+  fileName: string;
+  /** Storage object path: `<userId>/<attachmentId>/<fileName>`. Empty on public invoice payloads. */
+  path: string;
+  contentType: string;
+  size: number;
+}
+
 export interface LineItem {
   id: string;
   description: string;
@@ -28,6 +38,7 @@ export interface LineItem {
   sourceCalendarEntryId?: string;
   sourceRecurringLineItemId?: string;
   sourceDate?: string;
+  attachments?: LineItemAttachment[];
 }
 
 export interface CalendarEntry {

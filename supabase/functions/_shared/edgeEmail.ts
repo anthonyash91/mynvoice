@@ -1,3 +1,4 @@
+import type { EmailAttachment } from './lineItemAttachments.ts';
 import {
   automaticRemindersBlocked,
   resolveLateReminderIntervalDays,
@@ -280,6 +281,8 @@ export async function sendResendEmail(input: {
   html: string;
   pdfBase64?: string;
   filename?: string;
+  /** Line item files (e.g. receipts), sent after the invoice PDF. */
+  attachments?: EmailAttachment[];
 }): Promise<void> {
   const payload: Record<string, unknown> = {
     from: input.from,
@@ -293,13 +296,14 @@ export async function sendResendEmail(input: {
     payload.cc = cc;
   }
 
-  if (input.pdfBase64) {
-    payload.attachments = [
-      {
-        filename: input.filename?.trim() || 'invoice.pdf',
-        content: input.pdfBase64,
-      },
-    ];
+  const attachments: EmailAttachment[] = [
+    ...(input.pdfBase64
+      ? [{ filename: input.filename?.trim() || 'invoice.pdf', content: input.pdfBase64 }]
+      : []),
+    ...(input.attachments ?? []),
+  ];
+  if (attachments.length > 0) {
+    payload.attachments = attachments;
   }
 
   const response = await fetch('https://api.resend.com/emails', {

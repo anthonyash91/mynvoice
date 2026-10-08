@@ -4,6 +4,7 @@ import {
   sendResendEmail,
 } from '../_shared/edgeEmail.ts';
 import { generateInvoicePdfBase64 } from '../_shared/invoicePdf.ts';
+import { loadLineItemAttachments, publicLineItems } from '../_shared/lineItemAttachments.ts';
 import {
   capturePayPalOrder,
   createPayPalOrder,
@@ -353,7 +354,7 @@ function toPublicPayload(
       number: String(invoice.number),
       issueDate: String(invoice.issue_date),
       dueDate: invoice.due_date ? String(invoice.due_date) : null,
-      lineItems: invoice.line_items,
+      lineItems: publicLineItems(invoice.line_items),
       notes: String(invoice.notes ?? ''),
       taxEnabled: Boolean(invoice.tax_enabled),
       taxRate: Number(invoice.tax_rate ?? 0),
@@ -479,6 +480,11 @@ async function sendPaymentReceivedEmail(input: {
     String(input.invoice.public_token ?? '')
   );
   const rendered = renderTemplate(template, context);
+  const attachments = await loadLineItemAttachments(
+    input.supabase,
+    String(input.invoice.user_id),
+    input.invoice.line_items
+  );
 
   await sendResendEmail({
     apiKey: input.resendApiKey,
@@ -488,6 +494,7 @@ async function sendPaymentReceivedEmail(input: {
     html: rendered.html,
     pdfBase64: input.pdfBase64,
     filename: `${String(input.invoice.number)}.pdf`,
+    attachments,
   });
 
   const sentAt = new Date().toISOString();

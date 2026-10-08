@@ -12,6 +12,7 @@ import {
 } from '@/lib/calculations';
 import { formatDurationQuantity, formatInvoiceQuantity } from '@/lib/duration';
 import { splitStreetAndCityLines } from '@/lib/address';
+import { lineItemAttachments } from '@/lib/attachments';
 import { LINE_ITEM_KIND_LABEL, lineItemInvoiceDate, lineItemKindFromLineItem } from '@/lib/lineItem';
 import type { Client, Invoice, LineItem, Settings } from '@/types';
 
@@ -133,12 +134,18 @@ export function InvoicePrintDocument({
         </div>
         {invoice.lineItems.map((item) => {
           const itemDate = lineItemInvoiceDate(item);
+          const attachmentNames = lineItemAttachments(item).map((a) => a.fileName);
           return (
             <div key={item.id} className="invoice-print-line-row invoice-print-pdf-avoid-break">
               <div className="invoice-print-description">
                 <div>{item.description}</div>
                 {itemDate && (
                   <div className="invoice-print-line-date">{formatDate(itemDate)}</div>
+                )}
+                {attachmentNames.length > 0 && (
+                  <div className="invoice-print-line-attachment">
+                    Attached: {attachmentNames.join(', ')}
+                  </div>
                 )}
               </div>
               <div className="invoice-print-num invoice-print-qty-rate">
